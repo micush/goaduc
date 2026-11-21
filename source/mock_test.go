@@ -613,6 +613,26 @@ func TestMockServe(t *testing.T) { // ADUC_MOCK_SERVE=1 go test -run TestMockSer
 	if err := webCert.initAuto(filepath.Join(t.TempDir(), "tls")); err != nil {
 		t.Fatal(err)
 	}
+	if os.Getenv("ADUC_MOCK_PEERS") != "" { // a DC that refuses to purge, and a second DC with its own goaduc, to try the Recycle Bin dialog
+		mockRefusePurge.Store(true)
+		samDB, samDBUsable = "/mock/sam.ldb", func() bool { return true }
+		wipe := func(only string) {
+			d.mu.Lock()
+			defer d.mu.Unlock()
+			for k, o := range d.dir {
+				if o.str("isDeleted") == "TRUE" && strings.Contains(k, ",cn=deleted objects,") && (only == "" || strings.EqualFold(only, o.dn)) {
+					delete(d.dir, k)
+				}
+			}
+		}
+		sambaToolRun = func(args ...string) error { wipe(""); return nil }
+		ldbDelLocal = func(dn string) error { wipe(dn); return nil }
+		d.put("CN=DC2,CN=Servers,CN=Default-First-Site-Name,"+tSites, "objectClass", "server", "name", "DC2", "dNSHostName", "dc2.samdom.example.com")
+		d.put("CN=NTDS Settings,CN=DC2,CN=Servers,CN=Default-First-Site-Name,"+tSites, "objectClass", "nTDSDSA", "name", "NTDS Settings", "options", "0")
+		peer := newFakePeer(t)
+		_, port, _ := net.SplitHostPort(peer.srv.Listener.Addr().String())
+		peerAddr = func(host string) string { return net.JoinHostPort("127.0.0.1", port) }
+	}
 	d.start("127.0.0.1:3389")
 	cfg = Config{URL: "ldap://127.0.0.1:3389"}
 	http.ListenAndServe("127.0.0.1:8099", securityHeaders(buildMux()))
@@ -817,22 +837,29 @@ func TestPurgeLocalFallback(t *testing.T) {
 	d.put("CN=admin,CN=Users,"+tBase, "objectClass", "top", "objectClass", "person", "objectClass", "user", "sAMAccountName", "admin",
 		"userPrincipalName", "admin@samdom.example.com", "memberOf", "CN=Domain Admins,CN=Users,"+tBase)
 	d.mu.Unlock()
+	// without local=true the page is asked first and nothing runs (the removal is not replicated)
+	if r := c.ok("POST", "/api/deleted/purge", map[string]any{"dn": one}); r["needsLocal"] != true || r["server"] != "dc1.samdom.example.com" {
+		t.Fatalf("%v", r)
+	}
+	if len(toolArgs) != 0 || len(delDNs) != 0 || len(bin()) != 2 {
+		t.Fatal("the fallback ran without being agreed to")
+	}
 	// a failing local tool is reported and changes nothing
 	ldbDelLocal = func(dn string) error { return errors.New("boom") }
-	c.fail("POST", "/api/deleted/purge", map[string]any{"dn": one}, "local fallback failed: boom")
+	c.fail("POST", "/api/deleted/purge", map[string]any{"dn": one, "local": true}, "local fallback failed: boom")
 	ldbDelLocal = func(dn string) error { delDNs = append(delDNs, dn); wipe(dn); return nil }
 	if len(bin()) != 2 {
 		t.Fatal("a failed fallback changed the bin")
 	}
 	// one object, locally
-	if r := c.ok("POST", "/api/deleted/purge", map[string]any{"dn": one}); r["deleted"] != 1.0 {
+	if r := c.ok("POST", "/api/deleted/purge", map[string]any{"dn": one, "local": true}); r["deleted"] != 1.0 {
 		t.Fatal(r)
 	}
 	if len(delDNs) != 1 || delDNs[0] != one || len(bin()) != 1 {
 		t.Fatalf("%v %v", delDNs, bin())
 	}
 	// everything, locally: samba-tool expunge with a zero lifetime against -sam-db
-	if r := c.ok("POST", "/api/deleted/purge", map[string]any{"all": true}); r["deleted"] != 1.0 {
+	if r := c.ok("POST", "/api/deleted/purge", map[string]any{"all": true, "local": true}); r["deleted"] != 1.0 {
 		t.Fatal(r)
 	}
 	if strings.Join(toolArgs, " ") != "domain tombstones expunge --tombstone-lifetime=0 -H /scratch/sam.ldb" || len(bin()) != 0 {
@@ -841,7 +868,7 @@ func TestPurgeLocalFallback(t *testing.T) {
 	// an expunge that leaves objects behind is not reported as success
 	c.ok("POST", "/api/delete", map[string]any{"dn": "CN=bob,OU=Staff," + tBase})
 	sambaToolRun = func(args ...string) error { return nil }
-	c.fail("POST", "/api/deleted/purge", map[string]any{"all": true}, "left 1 of 1")
+	c.fail("POST", "/api/deleted/purge", map[string]any{"all": true, "local": true}, "left 1 of 1")
 }
 
 func TestConfigurationDeletesGoToTheBin(t *testing.T) {

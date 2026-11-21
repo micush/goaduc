@@ -26,8 +26,8 @@ There are also saved queries with a query builder, and *Export CSV* on the user 
 
 ![User properties](snaps/03-user-properties.png)
 
-Below the domain in the tree are the other naming contexts: Configuration, Schema and the DNS partitions. That's the
-ADSI Edit-style view, for the things nothing else in goaduc has a page for. Objects there show their raw LDAP class
+Next to the domain's own containers in the tree are the other naming contexts: Configuration (with Schema inside it)
+and the DNS partitions. That's the ADSI Edit-style view, for the things nothing else in goaduc has a page for. Objects there show their raw LDAP class
 instead of a friendly type, open the same properties dialog (with the Attributes tab), and can be renamed or deleted
 from the right-click menu. Typing an LDAP filter in the find box searches below whatever you have selected, and
 *Queries ▾ → Schema search* looks up schema classes and attributes by name, using whatever you typed in the find box.
@@ -138,10 +138,29 @@ while the feature is on. The delete dialog tells you which of the two will happe
 
 ![Recycle Bin right-click menu](snaps/13-recycle-bin-menu.png)
 
-Purging deleted objects is an LDAP delete run as the signed-in user, and a DC may refuse it (real AD does).
-If that happens and goaduc is running as root with `-sam-db` present, a Domain or Enterprise Admin's *Delete…* is done
-locally with `ldbdel`, and *Empty Recycle Bin…* with `samba-tool domain tombstones expunge --tombstone-lifetime=0`.
-Both are logged. If any of that isn't possible you just see the refusal.
+Purging deleted objects is an LDAP delete run as the signed-in user, and a DC may refuse it (real AD does; Samba does).
+If that happens and goaduc is running as root with `-sam-db` present, a Domain or Enterprise Admin gets a dialog instead
+of an error. Confirming it removes the object from this DC's own database, with `ldbdel` for *Delete…* and
+`samba-tool domain tombstones expunge --tombstone-lifetime=0` for *Empty Recycle Bin…*, and both are logged. If any of
+that isn't possible you just see the refusal.
+
+**That removal is local and nothing replicates it**, which is why two DCs can end up with different bins. So the same
+dialog lists the other domain controllers and can do it on all of them in one go:
+
+![Remove on this DC](snaps/13-recycle-bin-local.png)
+
+For that, goaduc has to be running on those DCs too (same port as this one, as root with their own `sam.ldb`). It reads
+the DC list from the directory, signs in on each other goaduc **as you, with your password**, and repeats the purge there;
+that goaduc checks your rights itself. A DC without goaduc shows as not reachable and is skipped, and you'd run
+`samba-tool domain tombstones expunge --tombstone-lifetime=0` on it by hand. The page header shows which DC the list
+comes from.
+
+Because your password is sent, a peer is only used if its certificate is trusted. A certificate that verifies for the
+DC's name (a real CA, or your own CA in the system store) is trusted automatically. A self-signed one is shown as *new*
+with its SHA-256 fingerprint: compare it with the one on that DC's Settings → Certificate page, and tick the box to
+trust it. goaduc then remembers the fingerprint (`peers.json` in the data directory), and if that DC ever presents a
+different certificate it shows *changed* and is not used until you approve it again. Nothing is sent to a peer whose
+certificate doesn't match.
 
 Enabling the Recycle Bin has a similar story. Samba refuses that request over LDAP even for Enterprise Admins,
 because it only accepts it from its own local system context. So when goaduc runs as root on the DC and gets that

@@ -1160,6 +1160,7 @@ func main() {
 	}
 	initUpdate(*dataDir)
 	initDNSBin(*dataDir)
+	initPeers(*dataDir)
 	if sysvolRoot == "" {
 		if st, err := os.Stat("/var/lib/samba/sysvol"); err == nil && st.IsDir() {
 			sysvolRoot = "/var/lib/samba/sysvol"
@@ -1187,6 +1188,9 @@ func main() {
 
 	if *listen == "" {
 		*listen = ":8443"
+	}
+	if _, port, err := net.SplitHostPort(*listen); err == nil && port != "" {
+		webPort = port // the other DCs' goaduc are expected on the same port
 	}
 	auto := *certFile == "" && *keyFile == ""
 	if !auto && (*certFile == "" || *keyFile == "") {

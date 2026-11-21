@@ -29,7 +29,7 @@ const fmtSize = n => n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) +
 async function renderGPO(page) {
   page.classList.add('split');
   const listEl = h('div', { class: 'zones' }), right = h('div', { class: 'recs' });
-  page.append(listEl, right);
+  pane(page, listEl, right, 'gpo');
   const err = h('span', { class: 'terr' });
   const tabBar = h('div', { class: 'tabs' }), body = h('div', { class: 'gbody' });
   let gpos = [], sysvol = { available: false, writable: false }, cur = null, tab = 'links', dirty = null;

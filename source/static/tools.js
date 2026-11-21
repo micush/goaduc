@@ -59,7 +59,7 @@ const DNS_FIELDS = {
 
 async function renderDNS(page) {
   const zl = h('div', { class: 'zones' }), right = h('div', { class: 'recs' });
-  page.classList.add('split'); page.append(zl, right);
+  page.classList.add('split'); pane(page, zl, right, 'dns');
   let zones = [], zone = null, rows = [], sel = null, filter = '';
   const msg = h('span', { class: 'pmsg' });
   const body = h('div', { class: 'tablewrap' });
@@ -263,7 +263,7 @@ const REPORTS = [
 async function renderReports(page) {
   page.classList.add('split');
   const left = h('div', { class: 'zones' }), right = h('div', { class: 'recs' });
-  page.append(left, right);
+  pane(page, left, right, 'reports');
   const out = h('div', { class: 'tablewrap' });
   const note = h('div', { class: 'pmsg' });
   const days = h('input', { type: 'text', value: '90', style: 'width:60px' });
@@ -353,6 +353,9 @@ async function importUsers() {
 }
 
 // ---------- Recycle Bin ----------
+// Where an object was deleted from. A parent that was deleted too (a GPO's Machine and User folders) is shown by its
+// own name, marked deleted, instead of the raw ...\0ADEL:<guid>,CN=Deleted Objects path.
+const deletedFrom = p => !p ? '' : /\\0ADEL:/i.test(p) ? p.replace(/\\0ADEL:[0-9a-f-]+/ig, '').replace(/,CN=Deleted Objects.*$/i, '') + ' (deleted)' : p.replace(/,DC=.*$/i, '');
 async function renderRecycle(page) {
   const err = h('span', { class: 'terr' }), body = h('div', { class: 'tablewrap' });
   const filt = h('input', { type: 'text', placeholder: 'Filter…', style: 'width:220px' });
@@ -361,12 +364,14 @@ async function renderRecycle(page) {
     title: 'Not enabled: deleted objects lose most attributes and group memberships. Enabling is forest-wide and cannot be undone.'
   }, 'Enable Recycle Bin…');
   let rows = [], truncated = false;
-  page.append(h('div', { class: 'toolbar' }, h('button', { onclick: load }, 'Refresh'), enableBtn, err, h('span', { class: 'sp' }), filt), body);
+  const dcLbl = h('span', { class: 'muted', title: 'The domain controller this page is reading' });
+  page.append(h('div', { class: 'toolbar' }, h('button', { onclick: load }, 'Refresh'), enableBtn, err, h('span', { class: 'sp' }), dcLbl, filt), body);
   filt.addEventListener('input', draw);
   async function load() {
     err.textContent = '';
     try {
       const [r, di] = await Promise.all([GET('/api/deleted'), GET('/api/domaininfo').catch(() => ({}))]);
+      dcLbl.textContent = (((di.rootDSE || {}).dnsHostName || [])[0] || '').split('.')[0];
       // records deleted on the DNS page live in goaduc's own list (AD keeps no record of an attribute value going away)
       const dnsRows = (r.dns || []).map(d => ({ dns: true, id: d.id, name: d.name + ' ' + d.type + ' ' + d.text, type: 'dnsrecord', sam: '', lastParent: d.zoneName, when: d.when, recycled: !d.restorable }));
       rows = [...r.objects, ...dnsRows].sort((a, b) => (b.when || '').localeCompare(a.when || ''));
@@ -383,7 +388,7 @@ async function renderRecycle(page) {
   function draw() {
     const q = filt.value.toLowerCase();
     const vis = rows.filter(r => !q || (r.name + ' ' + r.sam + ' ' + r.lastParent).toLowerCase().includes(q));
-    const tbl = simpleTable(['Name', 'Type', 'Logon name', 'Deleted from', 'Changed'], vis.map(r => [h('span', {}, icon(r.type), r.name), TYPE_LABEL[r.type] || r.type, r.sam, r.lastParent.replace(/,DC=.*$/i, ''), r.when]));
+    const tbl = simpleTable(['Name', 'Type', 'Logon name', 'Deleted from', 'Changed'], vis.map(r => [h('span', {}, icon(r.type), r.name), TYPE_LABEL[r.type] || r.type, r.sam, deletedFrom(r.lastParent), r.when]));
     tbl.querySelectorAll('tbody tr').forEach((tr, i) => tr.addEventListener('contextmenu', e => {
       e.preventDefault();
       const r = vis[i];
@@ -400,16 +405,44 @@ async function renderRecycle(page) {
     e.preventDefault();
     menu(e.clientX, e.clientY, [{ label: 'Empty Recycle Bin…', danger: true, disabled: !rows.length, fn: emptyBin }]);
   });
+  // The DC refused the LDAP delete. Removing locally is not replicated, so say so and offer the other DCs' goaduc too.
+  async function localDialog(r) {
+    const short = h => String(h || '').split('.')[0];
+    const STATE = { trusted: 'certificate trusted', pinned: 'certificate remembered', new: 'new certificate: check the fingerprint, then tick to trust it',
+      changed: 'CERTIFICATE CHANGED since last time: tick only if you expect that', unreachable: 'not reachable' };
+    const boxes = (r.peers || []).map(p => {
+      const cb = h('input', { type: 'checkbox', checked: p.state === 'trusted' || p.state === 'pinned', disabled: p.state === 'unreachable' });
+      return { p, cb, row: h('label', { class: 'chk', style: 'display:block;margin:6px 0' }, cb, ' ' + short(p.host) + ' — ',
+        h('span', { class: p.state === 'changed' ? 'terr' : 'muted' }, STATE[p.state] || p.state),
+        p.state === 'new' || p.state === 'changed' ? h('div', { class: 'muted', style: 'font-family:monospace;font-size:11px;word-break:break-all;margin-left:22px' }, p.fingerprint) : null,
+        p.state === 'unreachable' && p.error ? h('div', { class: 'muted', style: 'font-size:11px;margin-left:22px' }, p.error) : null) };
+    });
+    const body = h('div', {}, h('p', {}, `${short(r.server) || 'This DC'} will not delete these over LDAP. goaduc can remove them from this DC's own database, which is not replicated.`),
+      boxes.length ? h('p', { class: 'muted' }, 'Also remove on (goaduc signs in there as you):') : null, ...boxes.map(b => b.row));
+    const ok = await dialog('Remove on this DC', body, [{ label: 'Cancel' }, { label: 'Remove', danger: true, value: true }]);
+    if (!ok) return null;
+    return boxes.filter(b => b.cb.checked).map(b => ({ host: b.p.host, fingerprint: b.p.fingerprint }));
+  }
+  // Runs a purge; returns the text to show (red) when something failed, '' otherwise.
+  async function purgeWith(body) {
+    let res = await POST('/api/deleted/purge', body);
+    if (res.needsLocal) {
+      const peers = await localDialog(res);
+      if (!peers) return '';
+      res = await POST('/api/deleted/purge', { ...body, local: true, peers });
+    }
+    return (res.peers || []).filter(p => !p.ok).map(p => p.host.split('.')[0] + ': ' + p.error).join(' · ');
+  }
   async function purge(r) {
     if (!(await confirmBox('Delete', `Permanently delete “${r.name}”? This cannot be undone.`, 'Delete', true))) return;
     let msg = '';
-    try { await POST('/api/deleted/purge', r.dns ? { dns: r.id } : { dn: r.dn }); } catch (e) { msg = fmtErr(e); }
+    try { msg = r.dns ? (await POST('/api/deleted/purge', { dns: r.id }), '') : await purgeWith({ dn: r.dn }); } catch (e) { msg = fmtErr(e); }
     await load(); err.textContent = msg;   // load() clears the text, so a failure is put back after it
   }
   async function emptyBin() {
     if (!rows.length || !(await confirmBox('Empty Recycle Bin', `Permanently delete all ${rows.length} object(s)? This cannot be undone.`, 'Empty', true))) return;
     let msg = '';
-    try { await POST('/api/deleted/purge', { all: true }); } catch (e) { msg = fmtErr(e); }
+    try { msg = await purgeWith({ all: true }); } catch (e) { msg = fmtErr(e); }
     await load(); err.textContent = msg;
   }
   async function restore(r) {

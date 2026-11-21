@@ -174,34 +174,7 @@ func apiDomainInfo(w http.ResponseWriter, r *http.Request, s *Session) (any, err
 		}
 		out["fsmo"] = roles
 
-		type dc struct {
-			Name string `json:"name"`
-			DNS  string `json:"dns"`
-			Site string `json:"site"`
-			GC   bool   `json:"gc"`
-		}
-		sites := "CN=Sites," + s.config
-		dcs := map[string]*dc{}
-		if es, _, err := c.Search(sites, ScopeSub, "(objectClass=server)", []string{"dNSHostName"}, 1000); err == nil {
-			for _, e := range es {
-				dcs[strings.ToLower(e.DN)] = &dc{Name: dnLabel(e.DN, 0), DNS: e.Get("dNSHostName"), Site: dnLabel(e.DN, 2)}
-			}
-		}
-		if es, _, err := c.Search(sites, ScopeSub, "(objectClass=nTDSDSA)", []string{"options"}, 1000); err == nil {
-			for _, e := range es {
-				if d := dcs[strings.ToLower(parentDN(e.DN))]; d != nil {
-					d.GC = atoi64(e.Get("options"))&1 != 0
-				}
-			}
-		}
-		list := []*dc{}
-		for k, d := range dcs {
-			// only servers that have NTDS Settings are domain controllers
-			if _, err := c.Read("CN=NTDS Settings,"+k, []string{"objectClass"}); err == nil {
-				list = append(list, d)
-			}
-		}
-		sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
+		list := domainControllers(c, s)
 		out["dcs"] = list
 
 		// Recycle Bin status
@@ -211,6 +184,40 @@ func apiDomainInfo(w http.ResponseWriter, r *http.Request, s *Session) (any, err
 		return nil
 	})
 	return out, err
+}
+
+// dcInfo is one domain controller (a server object with NTDS Settings).
+type dcInfo struct {
+	Name string `json:"name"`
+	DNS  string `json:"dns"`
+	Site string `json:"site"`
+	GC   bool   `json:"gc"`
+}
+
+func domainControllers(c *Conn, s *Session) []*dcInfo {
+	sites := "CN=Sites," + s.config
+	dcs := map[string]*dcInfo{}
+	if es, _, err := c.Search(sites, ScopeSub, "(objectClass=server)", []string{"dNSHostName"}, 1000); err == nil {
+		for _, e := range es {
+			dcs[strings.ToLower(e.DN)] = &dcInfo{Name: dnLabel(e.DN, 0), DNS: e.Get("dNSHostName"), Site: dnLabel(e.DN, 2)}
+		}
+	}
+	if es, _, err := c.Search(sites, ScopeSub, "(objectClass=nTDSDSA)", []string{"options"}, 1000); err == nil {
+		for _, e := range es {
+			if d := dcs[strings.ToLower(parentDN(e.DN))]; d != nil {
+				d.GC = atoi64(e.Get("options"))&1 != 0
+			}
+		}
+	}
+	list := []*dcInfo{}
+	for k, d := range dcs {
+		// only servers that have NTDS Settings are domain controllers
+		if _, err := c.Read("CN=NTDS Settings,"+k, []string{"objectClass"}); err == nil {
+			list = append(list, d)
+		}
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
+	return list
 }
 
 // ---------- domain password policy ----------
@@ -844,6 +851,14 @@ func apiPurge(w http.ResponseWriter, r *http.Request, s *Session) (any, error) {
 		DN  string `json:"dn"`
 		All bool   `json:"all"`
 		DNS string `json:"dns"` // id of one deleted DNS record
+		// Local: the person agreed to remove it from this DC's own database when the DC refuses the LDAP delete
+		// (which nothing replicates). Peers: other DCs' goaduc to do the same on, each with the certificate fingerprint
+		// the person approved.
+		Local bool `json:"local"`
+		Peers []struct {
+			Host        string `json:"host"`
+			Fingerprint string `json:"fingerprint"`
+		} `json:"peers"`
 	}
 	if err := decode(r, &in); err != nil {
 		return nil, err
@@ -907,6 +922,28 @@ func apiPurge(w http.ResponseWriter, r *http.Request, s *Session) (any, error) {
 		if merr := s.With(func(c *Conn) (e error) { admin, e = isDomainAdmin(c, s); return e }); merr != nil || !admin {
 			return map[string]int{"deleted": n}, fmt.Errorf("%w (only a Domain Admin or Enterprise Admin can use the local fallback)", first)
 		}
+		if !in.Local { // ask first: this is not replicated; the page offers the other DCs too
+			resp := map[string]any{"needsLocal": true, "deleted": n, "error": first.Error(), "peers": []peerInfo{}}
+			var hosts []string
+			var server string
+			_ = s.With(func(c *Conn) error {
+				hosts, _ = peerHosts(c, s)
+				if root, err := c.Read("", []string{"dnsHostName"}); err == nil {
+					server = root.Get("dnsHostName")
+				}
+				return nil
+			})
+			resp["server"] = server
+			peers := make([]peerInfo, len(hosts))
+			var wg sync.WaitGroup
+			for i, h := range hosts {
+				wg.Add(1)
+				go func(i int, h string) { defer wg.Done(); peers[i] = probePeer(h) }(i, h)
+			}
+			wg.Wait()
+			resp["peers"] = peers
+			return resp, nil
+		}
 		log.Printf("recycle bin: LDAP refused for %s (%v); removing locally in %s", s.user, first, samDB)
 		var lerr error
 		if in.All {
@@ -928,6 +965,41 @@ func apiPurge(w http.ResponseWriter, r *http.Request, s *Session) (any, error) {
 		if in.All && n < len(dns) {
 			first = fmt.Errorf("local expunge left %d of %d objects", len(dns)-n, len(dns))
 		}
+	}
+	var peerRes []peerResult
+	if first == nil && in.Local && len(in.Peers) > 0 {
+		var hosts []string
+		_ = s.With(func(c *Conn) error { hosts, _ = peerHosts(c, s); return nil })
+		known := map[string]bool{}
+		for _, h := range hosts {
+			known[h] = true
+		}
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		for _, p := range in.Peers {
+			host := strings.ToLower(strings.TrimSpace(p.Host))
+			if !known[host] { // only domain controllers the directory lists, never an address from the browser
+				peerRes = append(peerRes, peerResult{Host: p.Host, Error: "not a domain controller of this domain"})
+				continue
+			}
+			body := map[string]any{"all": in.All}
+			if !in.All {
+				body["dn"] = in.DN
+			}
+			wg.Add(1)
+			go func(host, fp string) {
+				defer wg.Done()
+				r := purgeOnPeer(s, host, fp, body)
+				mu.Lock()
+				peerRes = append(peerRes, r)
+				mu.Unlock()
+			}(host, p.Fingerprint)
+		}
+		wg.Wait()
+		sort.Slice(peerRes, func(i, j int) bool { return peerRes[i].Host < peerRes[j].Host })
+	}
+	if first == nil && len(peerRes) > 0 {
+		return map[string]any{"deleted": n + dnsGone, "peers": peerRes}, nil
 	}
 	if first != nil {
 		if len(dns) == 1 {

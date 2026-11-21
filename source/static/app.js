@@ -73,6 +73,14 @@ const SITE_CONT = ['container', 'site', 'servers', 'server', 'ntds', 'transport'
 // as extra roots under the domain: their objects have no friendly types, so any object that can hold others is a node.
 const otherNCs = () => (info.ncs || []).filter(n => lc(n) !== lc(info.base));
 const inOtherNC = dn => !!dn && otherNCs().some(n => within(dn, n));
+// The other naming contexts hang off the domain node, sorted in with its containers (Schema stays inside Configuration).
+function withOtherNCs(list) {
+  if (section !== 'users') return list;
+  const have = new Set(list.map(i => lc(i.dn)));
+  const extra = otherNCs().filter(n => !otherNCs().some(o => lc(o) !== lc(n) && within(n, o)) && !have.has(lc(n)))
+    .map(dn => ({ dn, name: rdnName(dn), type: 'container', cont: true, class: 'naming context' }));
+  return [...list, ...extra].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+}
 const isCont = it => section === 'sites' ? SITE_CONT.includes(it.type) : USER_CONT.includes(it.type) || (section === 'users' && inOtherNC(it.dn) && !!it.cont);
 const sitesRoot = () => 'CN=Sites,' + info.config;
 const lc = x => String(x).toLowerCase();
@@ -141,6 +149,27 @@ function form(fields) { // fields: [{k,label,type,value,opts,full}] → {el, get
     inputs[f.k] = inp;
   }
   return { el, inputs, get: () => Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, i.type === 'checkbox' ? i.checked : i.value])) };
+}
+
+// ---------- draggable divider between a left and a right pane ----------
+// pane(parent, left, right, key): appends left, a divider and right to parent. Dragging the divider sets left's width
+// (remembered per key in localStorage); double-click puts it back to the default.
+function pane(parent, left, right, key) {
+  const K = 'aduc.pane.' + key;
+  const sp = h('div', { class: 'splitter', title: 'Drag to resize' });
+  try { const w = parseInt(localStorage.getItem(K), 10); if (w >= 120) left.style.width = w + 'px'; } catch (_) {}
+  sp.addEventListener('pointerdown', e => {
+    e.preventDefault(); sp.setPointerCapture(e.pointerId); sp.classList.add('drag');
+    const x0 = left.getBoundingClientRect().left;
+    const move = ev => { left.style.width = Math.max(120, Math.min(ev.clientX - x0, parent.clientWidth - 200)) + 'px'; };
+    const up = () => {
+      sp.classList.remove('drag'); sp.removeEventListener('pointermove', move); sp.removeEventListener('pointerup', up); sp.removeEventListener('pointercancel', up);
+      try { localStorage.setItem(K, String(Math.round(left.getBoundingClientRect().width))); } catch (_) {}
+    };
+    sp.addEventListener('pointermove', move); sp.addEventListener('pointerup', up); sp.addEventListener('pointercancel', up);
+  });
+  sp.addEventListener('dblclick', () => { left.style.width = ''; try { localStorage.removeItem(K); } catch (_) {} });
+  parent.append(left, sp, right);
 }
 
 // ---------- context menu ----------
@@ -224,11 +253,13 @@ function showMain() {
   }
   const treeEl = h('div', { class: 'tree' });
   const listEl = h('div', { class: 'list', id: 'list' });
-  $app.append(h('div', { class: 'toolbar' }, ...tools, h('span', { id: 'st-err', class: 'terr' })), h('div', { class: 'main' }, treeEl, listEl), statusBar());
+  const mainEl = h('div', { class: 'main' });
+  pane(mainEl, treeEl, listEl, 'tree');
+  $app.append(h('div', { class: 'toolbar' }, ...tools, h('span', { id: 'st-err', class: 'terr' })), mainEl, statusBar());
   const onSelect = dn => { mode = 'browse'; cur = dn; load(); };
   const onMenu = (e, n) => section === 'sites' ? sitesMenu(e.clientX, e.clientY, [n]) : inOtherNC(n.dn) ? browserMenu(e.clientX, e.clientY, [n]) : containerMenu(e.clientX, e.clientY, n);
   tree = section === 'sites' ? makeTree(treeEl, { rootDn: sitesRoot(), rootName: 'Sites', rootType: 'container', onSelect, onMenu })
-    : makeTree(treeEl, { onSelect, onMenu, extraRoots: otherNCs() });
+    : makeTree(treeEl, { onSelect, onMenu });
   tree.init();
 }
 
@@ -343,7 +374,8 @@ function makeTree(root, opts) {
     const r = await GET('/api/children', { dn: n.dn });
     n.kids.replaceChildren();
     n.loaded = true;
-    const cs = r.items.filter(i => isCont(i));
+    let cs = r.items.filter(i => isCont(i));
+    if (lc(n.dn) === lc(rootDn())) cs = withOtherNCs(cs);
     n.twisty.textContent = cs.length ? (n.open ? '▼' : '▶') : '';
     for (const c of cs) addNode(c, n.kids);
   }
@@ -378,7 +410,6 @@ function makeTree(root, opts) {
     root.replaceChildren();
     const ul = h('ul'); root.append(ul);
     const n = addNode({ dn: rootDn(), name: opts.rootName || info.realm, type: opts.rootType || 'domain' }, ul);
-    for (const dn of opts.extraRoots || []) addNode({ dn, name: dn, type: 'container' }, ul);   // other naming contexts, loaded when opened
     try { await loadKids(n); n.open = true; n.kids.hidden = false; n.twisty.textContent = n.kids.children.length ? '▼' : ''; } catch (e) { fail(e); }
     api_.select(rootDn());
   };
@@ -389,8 +420,7 @@ function makeTree(root, opts) {
     try { await loadKids(n); n.open = wasOpen || n.open; n.kids.hidden = !n.open; if (n.kids.children.length) n.twisty.textContent = n.open ? '▼' : '▶'; } catch (e) { fail(e); }
   };
   api_.reveal = async dn => { // expand path to dn
-    const roots = [rootDn(), ...(opts.extraRoots || [])].filter(r => within(dn, r)).sort((a, b) => b.length - a.length);   // the closest root
-    const top = roots[0] || rootDn();
+    const top = rootDn();
     const chain = []; let d = dn;
     while (d && d.toLowerCase() !== top.toLowerCase()) { chain.unshift(d); d = parentOf(d); }
     let p = nodes.get(top.toLowerCase());
@@ -410,7 +440,7 @@ async function load() {
   status('');
   try {
     const r = await GET('/api/children', { dn: cur });
-    items = r.items.map(withDetails); selected.clear();
+    items = (lc(cur) === lc(info.base) ? withOtherNCs(r.items) : r.items).map(withDetails); selected.clear();
     renderList(r.truncated ? 'Result list truncated at 5000 entries.' : '');
   } catch (e) { items = []; renderList(); fail(e); }
 }

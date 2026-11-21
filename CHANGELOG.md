@@ -1,5 +1,86 @@
 # Changelog
 
+## [v25] - 2026-11-21 — Recycle Bin: purge on all DCs, with consent; "Deleted from" fix
+
+### Added
+- **Purging on the other domain controllers.** A local purge (`ldbdel` / `samba-tool domain tombstones expunge`) is not
+  replicated, which is why two DCs showed different bins. When a DC refuses the LDAP purge and the local fallback is
+  possible, the page no longer runs it silently: *Delete…* / *Empty Recycle Bin…* now open a dialog ("not replicated") that
+  also lists the other DCs. For each ticked DC goaduc signs in on that DC's goaduc as the signed-in user and repeats the
+  purge there with `local=true`; the peer checks that user's rights itself. Failures per DC are shown in red
+  (`dc2: …`); what this DC did stands. A DC without goaduc shows "not reachable".
+- **Self-signed certificates for those calls:** a peer is trusted if its certificate verifies for the DC's name, otherwise
+  by an approved SHA-256 fingerprint. The dialog shows the fingerprint of a *new* certificate and the checkbox is the
+  approval; approved fingerprints are pinned in `peers.json` (0600, data directory); a different certificate later is
+  *changed*, unticked and flagged in red. Nothing (no password) is sent unless the check passes. Peers are taken from the
+  directory's DC list only (the request cannot name an arbitrary host), contacted on this goaduc's own port over HTTPS,
+  redirects are not followed.
+- The Recycle Bin page shows the short name of the DC it is reading.
+- `peers.go`, `peers_test.go` (`TestPurgeOnOtherDCs`: consent step, untrusted/wrong/changed certificate sends no login, a
+  non-DC host is never contacted, approved purge signs in as the user with `local` and `all`, pin remembered, peer error and
+  unreachable peer); the mock server can be started with `ADUC_MOCK_PEERS=1` to try the dialog.
+
+### Changed
+- `POST /api/deleted/purge`: without `local:true` a refused purge returns `{needsLocal, server, peers[]}` and does nothing;
+  `local` and `peers` carry the person's agreement. `domainControllers()` is shared with the Domain page.
+
+### Fixed
+- **"Deleted from" showed a raw `…\0ADEL:<guid>,CN=Deleted Objects,…` path** for objects whose parent was deleted too (a
+  GPO's Machine and User folders). It now shows the parent's own name with "(deleted)".
+
+### Verified
+- From `source/`: gofmt, `go vet`, `go test -race ./...`, `CGO_ENABLED=0 go test ./...`, linux/amd64, arm64, arm, 386,
+  riscv64 builds and `node --check` on the JS. Chromium against the mock with a fake second DC: the dialog, the new
+  certificate and its fingerprint (unticked by default), ticking it, both DCs purged, no error text.
+
+### Not verified
+- Two real goaduc instances on two Samba DCs, and a real Samba refusing the purge. A peer on an older goaduc (before v25) would
+  purge locally without being asked to, because it does not know `local`.
+
+## [v24] - 2026-11-21 — Draggable pane divider; naming contexts under the domain node
+
+### Added
+- **The divider between the left and right panes can be dragged** on every two-pane page: the tree in Users and Computers and
+  Sites and Services, and the left lists on DNS, Group Policy and Reports. Drag to resize (120 px minimum, always leaving 200 px
+  for the right side), double-click to reset to the default; the width is remembered per page in the browser
+  (`aduc.pane.<page>` in localStorage; without storage it just does not persist). Replaces the small native resize grip
+  the tree had in its bottom corner. Hover/drag shows the divider in the accent colour.
+
+### Changed
+- **The other naming contexts are now children of the domain node**, sorted in with Builtin, Computers, Users and the
+  rest (Configuration, DomainDnsZones, ForestDnsZones; Schema stays inside Configuration), instead of separate roots below
+  the tree. They also appear in the right-hand list when the domain is selected, and open on double-click.
+  (Supersedes v22's separate roots and v23's short names.)
+
+### Fixed
+- `snaps/10-other-naming-contexts.png` in v23 was the old screenshot (the retake script still looked for the full-DN root
+  name); retaken, it now shows the short root names.
+
+### Verified
+- From `source/`: gofmt, `go vet`, `go test -race ./...`, `CGO_ENABLED=0 go test ./...`, linux/amd64, arm64, arm, 386,
+  riscv64 builds and `node --check` on the JS. Chromium against the mock: the domain node's children in the tree and list
+  (Configuration, DomainDnsZones, Staff, System, Users, in order), expanding Configuration, double-click from the list; drag wider (290 → 480), clamp at 120 when dragged
+  past the edge, width restored after leaving and returning to the page, double-click back to 290, and the same on DNS and
+  Group Policy; no page errors. Not tried in dark mode or on a touch screen.
+
+## [v23] - 2026-11-21 — Tidier tree roots for the other naming contexts
+
+### Changed
+- The extra roots below the domain in Users and Computers show short names (*Configuration*, *DomainDnsZones*,
+  *ForestDnsZones*) instead of full DNs that were cut off at the pane edge; the full DN is the tooltip. They are set apart
+  from the domain tree by a small gap.
+- The Schema partition is no longer a root of its own: it lives inside Configuration (`CN=Schema,CN=Configuration,…`) and
+  was listed twice. It is still reached under Configuration, and *Schema search* still searches it.
+- `snaps/10-other-naming-contexts.png` retaken.
+
+### Verified
+- From `source/`: gofmt, `go vet`, `go test -race ./...`, `CGO_ENABLED=0 go test ./...`, linux/amd64, arm64, arm, 386,
+  riscv64 builds and `node --check` on the JS; Chromium against the mock (dark theme): roots *Configuration* and
+  *DomainDnsZones*, selecting one lists its children.
+
+### Not verified
+- A real Samba DC (it also has *ForestDnsZones*; the mock does not).
+
 ## [v22] - 2026-11-21 — LDAP Browser merged into Users and Computers
 
 ### Changed

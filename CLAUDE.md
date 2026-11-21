@@ -25,7 +25,7 @@ accept this layout and, for old releases, the flat one (everything at the top). 
 Files: `ldapc.go` (BER, filters, LDAP client), `main.go` (sessions, auth middleware, ADUC handlers, routes, `main()`),
 `sites.go` (Sites and Services create), `dns.go` (MS-DNSP record encode/decode, zone/record API), `tools.go` (domain
 info, policy/PSO, reports, recycle bin, audit), `gpo.go` (Group Policy objects, links, version/extension bookkeeping, `gpoCommit`), `gpofiles.go` (SYSVOL: GPT.INI,
-Registry.pol, GptTmpl.inf, plain files), `update.go` (the Update page: archive unpack, build, swap, boot guard), `tlscert.go` (self-signed web certificate), `webcert.go` (Settings → Certificate: upload, live swap, reset), `webcert_test.go`, `gpo_test.go`, `update_test.go`, `mock_test.go` (in-memory
+Registry.pol, GptTmpl.inf, plain files), `update.go` (the Update page: archive unpack, build, swap, boot guard), `tlscert.go` (self-signed web certificate), `webcert.go` (Settings → Certificate: upload, live swap, reset), `webcert_test.go`, `peers.go` (purging the Recycle Bin on the other DCs' goaduc: certificate trust, pinning, sign-in as the user), `peers_test.go`, `gpo_test.go`, `update_test.go`, `mock_test.go` (in-memory
 mock domain controller + integration tests), `ldapc_test.go`, `tools_test.go`.
 
 2. **Build and test before packaging, not after.** From `source/` run `gofmt -l .` (must print nothing),
@@ -50,6 +50,10 @@ mock domain controller + integration tests), `ldapc_test.go`, `tools_test.go`.
      byte-exact vector in `TestPolVectorAndRoundTrip`; `GptTmpl.inf` is written UTF-16LE with a BOM and CRLF. Writes
      carry an etag so a concurrent edit is refused. The mock has no SMB and no NT ACLs: say so in the changelog, and say
      what was not seen on a real Samba DC (permissions/ownership of written files, client processing).
+   - **Touched `peers.go` or the Recycle Bin purge?** It sends the signed-in user's password to other servers, so: only hosts
+     from the directory's DC list (never from the request), TLS verified or the exact approved SHA-256 fingerprint (never
+     `InsecureSkipVerify` without the check), nothing sent before that, no redirects followed, no body or error that echoes
+     the password. `peers_test.go` covers untrusted/wrong/changed certificates and a non-DC host with a fake peer; keep it passing.
    - **Touched the updater (`update.go`, `static/tools.js` Update page, `get.sh`)?** It runs uploaded or downloaded source
      through `go build` as the service user (usually root) and replaces the running binary, so the rules are strict and
      each has a test in `update_test.go`: only a Domain/Enterprise Admin verified over the user's own LDAP connection
