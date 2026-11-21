@@ -1,5 +1,21 @@
 # Changelog
 
+## [v30] - 2026-11-21 — Ctrl/shift-click and multi-delete in DNS records
+
+### Added
+- **DNS record list supports ctrl/Cmd-click and shift-click** (range; ctrl+shift adds a range), like the object list.
+- **Delete works on the whole selection**: one confirmation, then each record is removed. The right-click menu reads
+  "Delete N records" for several; Edit… is available only when exactly one record is selected. If a record is refused,
+  the ones before it are already gone, the list reloads and the error is shown.
+
+### Verified
+- From `source/`: gofmt, `go vet`, `go test -race ./...`, `CGO_ENABLED=0 go test ./...`, linux/amd64, arm64, arm, 386,
+  riscv64 cross-compiles, `node --check static/*.js`. In Chromium against the mock server: shift range, ctrl toggle,
+  ctrl add, right-click > Delete 2 records, confirmation, and the two records gone from the list.
+
+### Not verified
+- Against a real Samba DC.
+
 ## [v29] - 2026-11-21 — Shift-click ranges and drag-and-drop moves
 
 ### Added

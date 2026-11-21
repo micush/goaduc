@@ -60,7 +60,9 @@ const DNS_FIELDS = {
 async function renderDNS(page) {
   const zl = h('div', { class: 'zones' }), right = h('div', { class: 'recs' });
   page.classList.add('split'); pane(page, zl, right, 'dns');
-  let zones = [], zone = null, rows = [], sel = null, filter = '';
+  let zones = [], zone = null, rows = [], sel = null, filter = '', picked = new Map(), anchor = null; // picked: key -> record; sel: the record when exactly one is picked
+  const key = r => r.name + '|' + r.raw;
+  const setPicked = (rs, keepAnchor) => { picked = new Map(rs.map(r => [key(r), r])); sel = rs.length === 1 ? rs[0] : null; if (!keepAnchor) anchor = rs.length ? key(rs[rs.length - 1]) : null; };
   const msg = h('span', { class: 'pmsg' });
   const body = h('div', { class: 'tablewrap' });
   const filt = h('input', { type: 'text', placeholder: 'Filter records…', style: 'width:220px' });
@@ -78,10 +80,10 @@ async function renderDNS(page) {
       const z = zones[i];
       const label = depth && z.name.toLowerCase().endsWith('.' + zones[parent(z)].name.toLowerCase()) ? z.name.slice(0, -zones[parent(z)].name.length - 1) : z.name;
       const d = h('div', { class: 'zone' + (zone && zone.dn === z.dn ? ' sel' : ''), style: depth ? 'padding-left:' + (8 + 18 * depth) + 'px' : '' }, icon(z.reverse ? 'subnet' : 'domain'), label);
-      d.addEventListener('click', () => { zone = z; sel = null; loadZones(); loadRecords(); });
+      d.addEventListener('click', () => { zone = z; setPicked([]); loadZones(); loadRecords(); });
       d.addEventListener('contextmenu', e => {
         e.preventDefault();
-        const same = zone && zone.dn === z.dn; zone = z; sel = null; loadZones(); if (!same) loadRecords();
+        const same = zone && zone.dn === z.dn; zone = z; setPicked([]); loadZones(); if (!same) loadRecords();
         menu(e.clientX, e.clientY, [{ label: 'New record…', fn: () => editRec(null) }, { label: 'New subzone…', fn: () => newZone(z) }, '-', { label: 'Refresh', fn: refresh }]);
       });
       return [d, ...kids[i].flatMap(k => row(k, depth + 1))];
@@ -94,7 +96,7 @@ async function renderDNS(page) {
     const out = await dialog('New subzone — ' + parent.name, h('div', { class: 'frm' }, h('label', {}, 'Name'), i,
       h('div', { class: 'muted', style: 'font-size:12px' }, 'Creates it as a primary zone in the same partition.')),
       [{ label: 'Cancel' }, { label: 'Create', primary: true, action: async () => POST('/api/dns/zonecreate', { parent: parent.dn, name: i.value }) }]);
-    if (out && out.dn) { zone = { name: out.name, dn: out.dn }; sel = null; await loadZones(); loadRecords(); }
+    if (out && out.dn) { zone = { name: out.name, dn: out.dn }; setPicked([]); await loadZones(); loadRecords(); }
   }
   async function loadRecords() {
     if (!zone) return;
@@ -109,15 +111,23 @@ async function renderDNS(page) {
   function draw() {
     if (!zone) { body.replaceChildren(h('div', { class: 'muted', style: 'padding:14px' }, 'Select a zone.')); return; }
     const vis = rows.filter(r => !filter || (r.name + ' ' + r.type + ' ' + r.text).toLowerCase().includes(filter));
-    const key = r => r.name + '|' + r.raw;
     body.replaceChildren(h('table', {}, h('thead', {}, h('tr', {}, ['Name', 'Type', 'Data', 'TTL', 'Timestamp'].map(c => h('th', { style: 'cursor:default' }, c)))),
       h('tbody', {}, vis.map(r => {
-        const tr = h('tr', { class: 'row' + (sel && key(sel) === key(r) ? ' sel' : '') }, h('td', {}, r.name === '@' ? '(same as parent)' : r.name), h('td', {}, r.type), h('td', { title: r.text }, r.text), h('td', {}, String(r.ttl)), h('td', {}, r.dynamic ? r.timestamp : 'static'));
-        tr.addEventListener('click', () => { sel = r; draw(); });
+        const tr = h('tr', { class: 'row' + (picked.has(key(r)) ? ' sel' : '') }, h('td', {}, r.name === '@' ? '(same as parent)' : r.name), h('td', {}, r.type), h('td', { title: r.text }, r.text), h('td', {}, String(r.ttl)), h('td', {}, r.dynamic ? r.timestamp : 'static'));
+        tr.addEventListener('click', e => {
+          const ai = anchor ? vis.findIndex(x => key(x) === anchor) : -1;
+          if (e.shiftKey && ai >= 0) {   // range from the last plain/ctrl click; ctrl+shift adds it to the selection
+            const i = vis.indexOf(r), range = vis.slice(Math.min(ai, i), Math.max(ai, i) + 1);
+            setPicked((e.ctrlKey || e.metaKey) ? [...picked.values(), ...range.filter(x => !picked.has(key(x)))] : range, true);
+            getSelection().removeAllRanges();
+          } else if (e.ctrlKey || e.metaKey) setPicked(picked.has(key(r)) ? [...picked.values()].filter(x => key(x) !== key(r)) : [...picked.values(), r]);
+          else setPicked([r]);
+          draw();
+        });
         tr.addEventListener('dblclick', () => editRec(r));
         tr.addEventListener('contextmenu', e => {
-          e.preventDefault(); sel = r; draw();
-          menu(e.clientX, e.clientY, [{ label: 'Edit…', disabled: !r.editable, fn: () => editRec(r) }, { label: 'Delete', danger: true, fn: delRec }, '-',
+          e.preventDefault(); if (!picked.has(key(r))) { setPicked([r]); draw(); }
+          menu(e.clientX, e.clientY, [{ label: 'Edit…', disabled: picked.size !== 1 || !r.editable, fn: () => editRec(r) }, { label: picked.size > 1 ? 'Delete ' + picked.size + ' records' : 'Delete', danger: true, fn: delRec }, '-',
             { label: 'New record…', fn: () => editRec(null) }, { label: 'Refresh', fn: refresh }]);
         });
         return tr;
@@ -132,13 +142,17 @@ async function renderDNS(page) {
   });
   async function editRec(r) {
     if (r && !r.editable) return pageStatus(msg, 'This record type cannot be edited here.', true);
-    if (await dnsRecordDialog(zone, r)) { loadRecords(); }
+    if (await dnsRecordDialog(zone, r)) { setPicked([]); loadRecords(); }
   }
   async function delRec() {
-    if (!sel) return;
-    const r = sel;
-    if (!(await confirmBox('Delete record', `Delete ${r.type} record “${r.name === '@' ? zone.name : r.name}” (${r.text})?`, 'Delete', true))) return;
-    try { await POST('/api/dns/delete', { zone: zone.dn, name: r.name, old: r.raw, type: r.type }); sel = null; loadRecords(); } catch (e) { pageStatus(msg, fmtErr(e), true); }
+    const rs = [...picked.values()];
+    if (!rs.length) return;
+    const one = rs[0], nm = r => r.name === '@' ? zone.name : r.name;
+    if (!(await confirmBox('Delete record' + (rs.length > 1 ? 's' : ''), rs.length > 1 ? `Delete ${rs.length} records?` : `Delete ${one.type} record “${nm(one)}” (${one.text})?`, 'Delete', true))) return;
+    let err = null;
+    for (const r of rs) { try { await POST('/api/dns/delete', { zone: zone.dn, name: r.name, old: r.raw, type: r.type }); } catch (e) { err = e; break; } }
+    setPicked([]); await loadRecords();   // records before a refused one are already gone
+    if (err) pageStatus(msg, fmtErr(err), true);
   }
   right.append(h('div', { class: 'toolbar' }, btn('Refresh', refresh), btn('New record…', () => zone && editRec(null)),
     btn('Edit…', () => sel && editRec(sel)), btn('Delete', delRec, 'danger'), h('span', { class: 'sp' }), filt), msg, body);
