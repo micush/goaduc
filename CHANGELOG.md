@@ -1,5 +1,30 @@
 # Changelog
 
+## [v22] - 2026-11-21 — LDAP Browser merged into Users and Computers
+
+### Changed
+- **The LDAP Browser tab is gone.** Everything it did now lives in Users and Computers: the tree has the domain's other
+  naming contexts (Configuration, Schema, DomainDnsZones, …) as extra roots below the domain; their objects show the raw
+  LDAP class, open the same properties dialog and have Properties / Open in tree / Refresh / Rename / Delete in the
+  right-click menu (not for the naming-context root itself). The find box searches below the selected object with any LDAP
+  filter or text when one of those is selected, and *Queries ▾ → Schema search* searches classes and attributes by the
+  find box text. Containers in those contexts open on double-click like in the domain (the old browser always opened
+  properties). `snaps/10-ldap-browser.png` replaced by `snaps/10-other-naming-contexts.png`; README updated.
+
+### Fixed
+- **The sign-in response lacked the naming contexts, schema and root DN** (they only arrived after a page reload through
+  `/api/info`), so the old browser's dropdown listed only the domain and schema search used the wrong base right after
+  signing in. `POST /api/login` now returns `ncs`, `schema` and `root`; the mock test setup asserts it.
+
+### Verified
+- From `source/`: gofmt, `go vet`, `go test -race ./...`, `CGO_ENABLED=0 go test ./...`, linux/amd64, arm64, arm, 386,
+  riscv64 builds and `node --check` on the JS. In Chromium against the mock: three roots in the tree, expanding
+  Configuration, the raw-class column, double-click, right-click menu, Schema search.
+
+### Not verified
+- Schema search against real schema data (the mock directory has no schema classes, so it returned 0 objects), and a
+  real Samba DC.
+
 ## [v21] - 2026-11-21 — Go sources moved into `source/`
 
 ### Changed

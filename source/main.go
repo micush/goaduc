@@ -584,7 +584,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	sessMu.Unlock()
 	http.SetCookie(w, &http.Cookie{Name: "aduc", Value: tok, Path: "/", HttpOnly: true,
 		SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil, MaxAge: 0})
-	writeJSON(w, 200, map[string]any{"user": s.user, "base": s.base, "config": s.config, "realm": realmFromBase(s.base)})
+	writeJSON(w, 200, map[string]any{"user": s.user, "base": s.base, "config": s.config, "root": s.root, "schema": s.schema, "ncs": s.ncs, "realm": realmFromBase(s.base)})
 }
 
 // rootDSERealm reads the domain name from the server's RootDSE over an unauthenticated connection ("" if unavailable).

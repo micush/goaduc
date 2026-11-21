@@ -69,9 +69,14 @@ const TYPE_LABEL = { dnsrecord: 'DNS record', site: 'Site', subnet: 'Subnet', si
 const USER_CONT = ['ou', 'container', 'domain', 'builtin'];
 const SITE_CONT = ['container', 'site', 'servers', 'server', 'ntds', 'transport'];
 // Tree nodes and "open on double-click": in the LDAP Browser only objects that can hold others; elsewhere by kind.
-const isCont = it => section === 'browser' ? !!it.cont : (section === 'sites' ? SITE_CONT : USER_CONT).includes(it.type);
+// Naming contexts other than the domain (Configuration, Schema, the DNS partitions) are browsed in Users and Computers
+// as extra roots under the domain: their objects have no friendly types, so any object that can hold others is a node.
+const otherNCs = () => (info.ncs || []).filter(n => lc(n) !== lc(info.base));
+const inOtherNC = dn => !!dn && otherNCs().some(n => within(dn, n));
+const isCont = it => section === 'sites' ? SITE_CONT.includes(it.type) : USER_CONT.includes(it.type) || (section === 'users' && inOtherNC(it.dn) && !!it.cont);
 const sitesRoot = () => 'CN=Sites,' + info.config;
 const lc = x => String(x).toLowerCase();
+const within = (dn, base) => lc(dn) === lc(base) || lc(dn).endsWith(',' + lc(base));
 const isProtectedSite = dn => { const sr = sitesRoot(); return [info.config, sr, 'CN=Subnets,' + sr, 'CN=Inter-Site Transports,' + sr, 'CN=IP,CN=Inter-Site Transports,' + sr, 'CN=SMTP,CN=Inter-Site Transports,' + sr].some(p => lc(p) === lc(dn)); };
 const rdnName = dn => { const r = dn.split(/(?<!\\),/)[0]; return r.slice(r.indexOf('=') + 1).replace(/\\(.)/g, '$1'); };
 const parentOf = dn => dn.split(/(?<!\\),/).slice(1).join(',');
@@ -185,8 +190,7 @@ function showLogin(msg) {
 }
 
 // ---------- main layout ----------
-const SECTIONS = [['users', 'Users and Computers'], ['sites', 'Sites and Services'], ['dns', 'DNS'], ['gpo', 'Group Policy'], ['domain', 'Domain'], ['reports', 'Reports'], ['browser', 'LDAP Browser'], ['audit', 'Audit Log'], ['recycle', 'Recycle Bin'], ['settings', 'Settings']];
-let browserNC = null;
+const SECTIONS = [['users', 'Users and Computers'], ['sites', 'Sites and Services'], ['dns', 'DNS'], ['gpo', 'Group Policy'], ['domain', 'Domain'], ['reports', 'Reports'], ['audit', 'Audit Log'], ['recycle', 'Recycle Bin'], ['settings', 'Settings']];
 
 function navBar() {
   return h('div', { class: 'topbar' },
@@ -202,10 +206,12 @@ function showMain() {
   if (TOOLS[section]) { const page = h('div', { class: 'page' }); $app.append(page, statusBar()); TOOLS[section](page); return; }
 
   let tools;
+  searchBox = null;
   if (section === 'users') {
     const q = h('input', { type: 'text', placeholder: 'Find users, groups, computers (or an LDAP filter)…' });
     const qt = h('select', {}, [['all', 'All'], ['user', 'Users'], ['group', 'Groups'], ['computer', 'Computers'], ['ou', 'OUs'], ['disabled', 'Disabled accounts']].map(([v, l]) => h('option', { value: v }, l)));
-    const doFind = () => runSearch(q.value.trim(), qt.value);
+    const doFind = () => inOtherNC(cur) ? runSearch(q.value.trim(), 'any', cur) : runSearch(q.value.trim(), qt.value);
+    searchBox = q;
     q.addEventListener('keydown', e => { if (e.key === 'Enter') doFind(); });
     tools = [h('button', { onclick: () => refresh() }, 'Refresh'),
       h('button', { onclick: () => newObject('user') }, 'New user'), h('button', { onclick: () => newObject('group') }, 'New group'),
@@ -215,39 +221,29 @@ function showMain() {
   } else if (section === 'sites') {
     tools = [h('button', { onclick: () => refresh() }, 'Refresh'), h('button', { onclick: () => newSite() }, 'New site'),
       h('button', { onclick: () => newSubnet() }, 'New subnet'), h('button', { onclick: () => newSiteLink() }, 'New site link'), h('span', { class: 'sp' })];
-  } else { // browser
-    browserNC = browserNC || info.base;
-    const ncSel = h('select', { style: 'max-width:320px' }, (info.ncs && info.ncs.length ? info.ncs : [info.base]).map(n => h('option', { value: n }, n)));
-    ncSel.value = browserNC;
-    ncSel.addEventListener('change', () => { browserNC = ncSel.value; showMain(); });
-    const q = h('input', { type: 'text', placeholder: 'Text or LDAP filter, e.g. (objectClass=dnsNode)' });
-    const base = () => cur || browserNC;
-    const go = () => runSearch(q.value.trim(), 'any', base());
-    q.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
-    tools = [ncSel, h('button', { onclick: () => refresh() }, 'Refresh'), h('span', { class: 'sp' }), q, h('button', { onclick: go }, 'Search below selection'),
-      h('button', { title: 'Search classes and attributes in the schema by name', onclick: () => { const t = q.value.trim(); runSearch('(&(|(objectClass=classSchema)(objectClass=attributeSchema))' + (t ? '(|(lDAPDisplayName=*' + escF(t) + '*)(name=*' + escF(t) + '*))' : '') + ')', 'any', info.schema); } }, 'Schema search')];
   }
   const treeEl = h('div', { class: 'tree' });
   const listEl = h('div', { class: 'list', id: 'list' });
   $app.append(h('div', { class: 'toolbar' }, ...tools, h('span', { id: 'st-err', class: 'terr' })), h('div', { class: 'main' }, treeEl, listEl), statusBar());
   const onSelect = dn => { mode = 'browse'; cur = dn; load(); };
-  const onMenu = (e, n) => section === 'sites' ? sitesMenu(e.clientX, e.clientY, [n]) : section === 'browser' ? browserMenu(e.clientX, e.clientY, [n]) : containerMenu(e.clientX, e.clientY, n);
+  const onMenu = (e, n) => section === 'sites' ? sitesMenu(e.clientX, e.clientY, [n]) : inOtherNC(n.dn) ? browserMenu(e.clientX, e.clientY, [n]) : containerMenu(e.clientX, e.clientY, n);
   tree = section === 'sites' ? makeTree(treeEl, { rootDn: sitesRoot(), rootName: 'Sites', rootType: 'container', onSelect, onMenu })
-    : section === 'browser' ? makeTree(treeEl, { rootDn: browserNC, rootName: browserNC, rootType: 'container', onSelect, onMenu })
-      : makeTree(treeEl, { onSelect, onMenu });
+    : makeTree(treeEl, { onSelect, onMenu, extraRoots: otherNCs() });
   tree.init();
 }
 
+let searchBox = null;   // the find box of Users and Computers (Queries ▾ → Schema search uses its text)
 function browserMenu(x, y, sel) {
   if (!sel.length) return;
   const one = sel.length === 1 ? sel[0] : null, e = [];
+  const isNC = sel.some(n => (info.ncs || []).some(c => lc(c) === lc(n.dn)));
   if (one) {
     e.push({ label: 'Properties', fn: () => properties(one.dn) });
     e.push({ label: 'Open in tree', fn: async () => { try { await tree.reveal(one.dn); tree.select(one.dn); } catch (er) { fail(er); } } });
     e.push({ label: 'Refresh', fn: () => { tree.refresh(one.dn); if (lc(cur) === lc(one.dn)) load(); } });
-    e.push('-', { label: 'Rename…', fn: () => renameObj(one.dn) });
+    if (!isNC) e.push('-', { label: 'Rename…', fn: () => renameObj(one.dn) });
   }
-  e.push({ label: 'Delete…', danger: true, fn: () => deleteObjs(sel) });
+  if (!isNC) e.push({ label: 'Delete…', danger: true, fn: () => deleteObjs(sel) });
   menu(x, y, e);
 }
 
@@ -267,6 +263,7 @@ function queriesMenu(btn) {
   const e = qs.map(q => ({ label: q.name, fn: () => runSearch(q.filter, 'all', q.base || info.base) }));
   if (qs.length) e.push('-');
   e.push({ label: 'Query builder…', fn: () => queryBuilder() });
+  e.push({ label: 'Schema search', fn: () => { const t = (searchBox ? searchBox.value : '').trim(); runSearch('(&(|(objectClass=classSchema)(objectClass=attributeSchema))' + (t ? '(|(lDAPDisplayName=*' + escF(t) + '*)(name=*' + escF(t) + '*))' : '') + ')', 'any', info.schema); } });
   if (qs.length) { e.push('-'); for (const q of qs) e.push({ label: 'Delete “' + q.name + '”', danger: true, fn: () => storeQueries(loadQueries().filter(x => x.name !== q.name)) }); }
   menu(r.left, r.bottom + 2, e);
 }
@@ -381,6 +378,7 @@ function makeTree(root, opts) {
     root.replaceChildren();
     const ul = h('ul'); root.append(ul);
     const n = addNode({ dn: rootDn(), name: opts.rootName || info.realm, type: opts.rootType || 'domain' }, ul);
+    for (const dn of opts.extraRoots || []) addNode({ dn, name: dn, type: 'container' }, ul);   // other naming contexts, loaded when opened
     try { await loadKids(n); n.open = true; n.kids.hidden = false; n.twisty.textContent = n.kids.children.length ? '▼' : ''; } catch (e) { fail(e); }
     api_.select(rootDn());
   };
@@ -391,9 +389,11 @@ function makeTree(root, opts) {
     try { await loadKids(n); n.open = wasOpen || n.open; n.kids.hidden = !n.open; if (n.kids.children.length) n.twisty.textContent = n.open ? '▼' : '▶'; } catch (e) { fail(e); }
   };
   api_.reveal = async dn => { // expand path to dn
+    const roots = [rootDn(), ...(opts.extraRoots || [])].filter(r => within(dn, r)).sort((a, b) => b.length - a.length);   // the closest root
+    const top = roots[0] || rootDn();
     const chain = []; let d = dn;
-    while (d && d.toLowerCase() !== rootDn().toLowerCase()) { chain.unshift(d); d = parentOf(d); }
-    let p = nodes.get(rootDn().toLowerCase());
+    while (d && d.toLowerCase() !== top.toLowerCase()) { chain.unshift(d); d = parentOf(d); }
+    let p = nodes.get(top.toLowerCase());
     for (const c of chain) {
       if (!p) return;
       if (!p.loaded) await loadKids(p);
@@ -459,7 +459,7 @@ function renderList(note) {
   const rows = sorted.map(it => {
     const tr = h('tr', { class: 'row' + (selected.has(it.dn) ? ' sel' : '') },
       h('td', { class: it.disabled ? 'dis' : '' }, icon(it.type), it.name),
-      h('td', {}, section === 'browser' ? (it.class || it.type) : (TYPE_LABEL[it.type] || it.type)),
+      h('td', {}, inOtherNC(it.dn) ? (it.class || it.type) : (TYPE_LABEL[it.type] || it.type)),
       h('td', { title: section === 'sites' ? it.details : '' }, section === 'sites' ? it.details : (it.sam || '')),
       h('td', { title: it.description }, it.description),
       mode === 'search' ? h('td', { title: it.dn }, parentOf(it.dn)) : null);
@@ -472,7 +472,7 @@ function renderList(note) {
     tr.addEventListener('contextmenu', e => {
       e.preventDefault();
       if (!selected.has(it.dn)) { selected.clear(); selected.add(it.dn); paint(); }
-      section === 'sites' ? sitesMenu(e.clientX, e.clientY, selItems()) : section === 'browser' ? browserMenu(e.clientX, e.clientY, selItems()) : itemMenu(e.clientX, e.clientY);
+      section === 'sites' ? sitesMenu(e.clientX, e.clientY, selItems()) : selItems().length && selItems().every(i => inOtherNC(i.dn)) ? browserMenu(e.clientX, e.clientY, selItems()) : itemMenu(e.clientX, e.clientY);
     });
     return tr;
   });
@@ -484,11 +484,10 @@ function renderList(note) {
   const cnt = document.getElementById('st-count');
   cnt.textContent = (mode === 'search' ? 'Search results: ' : '') + items.length + ' object' + (items.length === 1 ? '' : 's') + (note ? ' (truncated)' : '');
   cnt.title = note || '';
-  el.oncontextmenu = e => { if (e.target === el && mode === 'browse') { e.preventDefault(); if (section === 'sites') sitesMenu(e.clientX, e.clientY, [{ dn: cur, name: rdnName(cur), type: 'container' }]); else containerMenu(e.clientX, e.clientY, { dn: cur }); } };
+  el.oncontextmenu = e => { if (e.target === el && mode === 'browse') { e.preventDefault(); if (section === 'sites') sitesMenu(e.clientX, e.clientY, [{ dn: cur, name: rdnName(cur), type: 'container' }]); else if (inOtherNC(cur)) browserMenu(e.clientX, e.clientY, [{ dn: cur, name: rdnName(cur), type: 'container' }]); else containerMenu(e.clientX, e.clientY, { dn: cur }); } };
 }
 
 async function openItem(it) {
-  if (section === 'browser') return properties(it.dn);
   if (isCont(it) && mode === 'browse') {
     try { await tree.reveal(it.dn); tree.select(it.dn); } catch (e) { fail(e); }
   } else properties(it.dn);

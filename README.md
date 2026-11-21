@@ -26,6 +26,14 @@ There are also saved queries with a query builder, and *Export CSV* on the user 
 
 ![User properties](snaps/03-user-properties.png)
 
+Below the domain in the tree are the other naming contexts: Configuration, Schema and the DNS partitions. That's the
+ADSI Edit-style view, for the things nothing else in goaduc has a page for. Objects there show their raw LDAP class
+instead of a friendly type, open the same properties dialog (with the Attributes tab), and can be renamed or deleted
+from the right-click menu. Typing an LDAP filter in the find box searches below whatever you have selected, and
+*Queries ▾ → Schema search* looks up schema classes and attributes by name, using whatever you typed in the find box.
+
+![Other naming contexts](snaps/10-other-naming-contexts.png)
+
 ### Sites and Services
 
 Works on `CN=Sites,CN=Configuration,...`. You can create sites (with their Servers and NTDS Site Settings children,
@@ -96,13 +104,6 @@ pre-auth disabled, unconstrained delegation, privileged group members and empty 
 There's also a **bulk CSV user import** that generates passwords for you.
 
 ![Reports](snaps/09-reports.png)
-
-### LDAP Browser
-
-An ADSI Edit-style view of every naming context (domain, configuration, schema, the DNS partitions), plus schema
-search.
-
-![LDAP Browser](snaps/10-ldap-browser.png)
 
 ### Audit Log
 

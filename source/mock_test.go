@@ -579,7 +579,11 @@ func setup(t *testing.T) (*tc, *mockDC) {
 	jar, _ := cookiejar.New(nil)
 	c := &tc{t, srv, &http.Client{Jar: jar}}
 	t.Cleanup(func() { srv.Close(); d.ln.Close() })
-	c.ok("POST", "/api/login", map[string]string{"username": "admin@samdom.example.com", "password": "secret"})
+	out := c.ok("POST", "/api/login", map[string]string{"username": "admin@samdom.example.com", "password": "secret"})
+	// the UI needs the naming contexts and the schema DN right after sign-in (other-NC roots, schema search)
+	if len(list(out["ncs"])) != 3 || out["schema"] != "CN=Schema,"+tCfg {
+		t.Fatalf("login response: %v", out)
+	}
 	return c, d
 }
 

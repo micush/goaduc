@@ -132,7 +132,7 @@ the final tree.
   label, a few words of small text beside it, a row's colour). Not even a red one: no box, no bar, no background, no
   border. A failure the person must act on is plain red text (no box) beside the control that failed, and nothing else.
   When touching a page, remove any banner you find in the code you are changing. Failures in the Users and Computers /
-  Sites / LDAP Browser views are plain red text at the end of the toolbar (`status(msg, true)` → `#st-err`); there is no
+  Sites views (including the other naming contexts shown in Users and Computers) are plain red text at the end of the toolbar (`status(msg, true)` → `#st-err`); there is no
   progress or success text. *Known leftovers, remove when touching them:* the `.pmsg` message lines on the pages in
   `static/tools.js` (`pageStatus`, DNS, Domain, Reports, Audit), which still show progress and success text. The Recycle
   Bin page is already clean: errors are red text in its toolbar and the "not enabled" state is the *Enable Recycle Bin…*
