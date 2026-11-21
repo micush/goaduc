@@ -1,5 +1,21 @@
 # Changelog
 
+## [v27] - 2026-11-21 — DNS zone list: nested subzones, no pills, no hint text
+
+### Changed
+- **`_msdcs` is shown under its parent zone.** Any zone whose name ends in `.<another zone>` is listed beneath that zone,
+  indented and labelled with the short name (`ad.example.com` > `_msdcs`). Reverse zones are unaffected.
+- **Removed the Forest/Domain scope pills** next to zone names.
+- **Removed the "Create or delete zones with samba-tool…" text** under the zone list.
+
+### Verified
+- From `source/`: gofmt, `go vet`, `go test -race ./...`, `CGO_ENABLED=0 go test ./...`, linux/amd64, arm64, arm, 386,
+  riscv64 cross-compiles, `node --check static/*.js`. Zone tree checked in Chromium against the mock server (the mock
+  has no forest zone, so the zone list response was stubbed with `_msdcs` and its parent); snaps 05 and 06 retaken.
+
+### Not verified
+- Against a real Samba DC's zone list.
+
 ## [v26] - 2026-11-21 — Tree rows stay aligned in a narrow pane
 
 ### Fixed

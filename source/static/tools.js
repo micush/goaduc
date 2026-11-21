@@ -69,17 +69,25 @@ async function renderDNS(page) {
 
   async function loadZones() {
     try { zones = (await GET('/api/dns/zones')).zones; } catch (e) { return pageStatus(msg, fmtErr(e), true); }
-    zl.replaceChildren(h('div', { class: 'zh' }, 'DNS zones'), ...zones.map(z => {
-      const d = h('div', { class: 'zone' + (zone && zone.dn === z.dn ? ' sel' : '') }, icon(z.reverse ? 'subnet' : 'domain'), z.name, h('span', { class: 'badge' }, z.scope));
+    // A zone named under another zone (_msdcs.ad.example.com under ad.example.com) is shown beneath it.
+    const lower = zones.map(z => z.name.toLowerCase());
+    const parent = z => { let best = -1; lower.forEach((n, i) => { if (z.name.toLowerCase().endsWith('.' + n) && (best < 0 || n.length > lower[best].length)) best = i; }); return best; };
+    const kids = zones.map(() => []), top = [];
+    zones.forEach((z, i) => { const p = parent(z); (p < 0 ? top : kids[p]).push(i); });
+    const row = (i, depth) => {
+      const z = zones[i];
+      const label = depth && z.name.toLowerCase().endsWith('.' + zones[parent(z)].name.toLowerCase()) ? z.name.slice(0, -zones[parent(z)].name.length - 1) : z.name;
+      const d = h('div', { class: 'zone' + (zone && zone.dn === z.dn ? ' sel' : ''), style: depth ? 'padding-left:' + (8 + 18 * depth) + 'px' : '' }, icon(z.reverse ? 'subnet' : 'domain'), label);
       d.addEventListener('click', () => { zone = z; sel = null; loadZones(); loadRecords(); });
       d.addEventListener('contextmenu', e => {
         e.preventDefault();
         const same = zone && zone.dn === z.dn; zone = z; sel = null; loadZones(); if (!same) loadRecords();
         menu(e.clientX, e.clientY, [{ label: 'New record…', fn: () => editRec(null) }, '-', { label: 'Refresh', fn: refresh }]);
       });
-      return d;
-    }), ...(zones.length ? [] : [h('div', { class: 'muted', style: 'padding:8px' }, 'No DNS zones found (is this a Samba AD DNS server?)')]),
-      h('div', { class: 'muted', style: 'padding:10px;font-size:12px' }, 'Create or delete zones with samba-tool dns zonecreate / zonedelete.'));
+      return [d, ...kids[i].flatMap(k => row(k, depth + 1))];
+    };
+    zl.replaceChildren(h('div', { class: 'zh' }, 'DNS zones'), ...top.flatMap(i => row(i, 0)),
+      ...(zones.length ? [] : [h('div', { class: 'muted', style: 'padding:8px' }, 'No DNS zones found (is this a Samba AD DNS server?)')]));
   }
   async function loadRecords() {
     if (!zone) return;
