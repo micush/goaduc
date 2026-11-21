@@ -82,12 +82,19 @@ async function renderDNS(page) {
       d.addEventListener('contextmenu', e => {
         e.preventDefault();
         const same = zone && zone.dn === z.dn; zone = z; sel = null; loadZones(); if (!same) loadRecords();
-        menu(e.clientX, e.clientY, [{ label: 'New record…', fn: () => editRec(null) }, '-', { label: 'Refresh', fn: refresh }]);
+        menu(e.clientX, e.clientY, [{ label: 'New record…', fn: () => editRec(null) }, { label: 'New subzone…', fn: () => newZone(z) }, '-', { label: 'Refresh', fn: refresh }]);
       });
       return [d, ...kids[i].flatMap(k => row(k, depth + 1))];
     };
     zl.replaceChildren(h('div', { class: 'zh' }, 'DNS zones'), ...top.flatMap(i => row(i, 0)),
       ...(zones.length ? [] : [h('div', { class: 'muted', style: 'padding:8px' }, 'No DNS zones found (is this a Samba AD DNS server?)')]));
+  }
+  async function newZone(parent) {
+    const i = h('input', { type: 'text', placeholder: 'e.g. sub' });
+    const out = await dialog('New subzone — ' + parent.name, h('div', { class: 'frm' }, h('label', {}, 'Name'), i,
+      h('div', { class: 'muted', style: 'font-size:12px' }, 'Creates it as a primary zone in the same partition.')),
+      [{ label: 'Cancel' }, { label: 'Create', primary: true, action: async () => POST('/api/dns/zonecreate', { parent: parent.dn, name: i.value }) }]);
+    if (out && out.dn) { zone = { name: out.name, dn: out.dn }; sel = null; await loadZones(); loadRecords(); }
   }
   async function loadRecords() {
     if (!zone) return;

@@ -1167,3 +1167,26 @@ func mockSysvol(t testing.TB) string {
 	os.WriteFile(filepath.Join(gdir, "GPT.INI"), []byte("[General]\r\nVersion=65537\r\n"), 0o644)
 	return root
 }
+
+func TestDNSZoneCreate(t *testing.T) {
+	c, d := setup(t)
+	z := list(c.ok("GET", "/api/dns/zones", nil)["zones"])
+	parent := z[0].(map[string]any)["dn"].(string)
+	r := c.ok("POST", "/api/dns/zonecreate", map[string]any{"parent": parent, "name": "sub"})
+	if r["name"] != "sub.samdom.example.com" {
+		t.Fatalf("%v", r)
+	}
+	if d.dir[strings.ToLower("DC=@,"+r["dn"].(string))] == nil {
+		t.Fatal("apex node missing")
+	}
+	recs := list(c.ok("GET", "/api/dns/records?zone="+r["dn"].(string), nil)["nodes"])
+	if len(recs) != 1 || len(list(recs[0].(map[string]any)["records"])) != 2 {
+		t.Fatalf("%v", recs)
+	}
+	if len(list(c.ok("GET", "/api/dns/zones", nil)["zones"])) != 2 {
+		t.Fatal("zone not listed")
+	}
+	c.fail("POST", "/api/dns/zonecreate", map[string]any{"parent": parent, "name": "sub"}, "already exists")
+	c.fail("POST", "/api/dns/zonecreate", map[string]any{"parent": parent, "name": "bad name"}, "not a valid zone name")
+	c.fail("POST", "/api/dns/zonecreate", map[string]any{"parent": "CN=Users," + tBase, "name": "x"}, "not a DNS zone")
+}

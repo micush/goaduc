@@ -24,6 +24,7 @@ import (
 func registerTools(mux *http.ServeMux) {
 	mux.HandleFunc("/api/dns/zones", auth(apiDNSZones))
 	mux.HandleFunc("/api/dns/records", auth(apiDNSRecords))
+	mux.HandleFunc("/api/dns/zonecreate", auth(apiDNSZoneCreate))
 	mux.HandleFunc("/api/dns/save", auth(apiDNSSave))
 	mux.HandleFunc("/api/dns/delete", auth(apiDNSDelete))
 	mux.HandleFunc("/api/domaininfo", auth(apiDomainInfo))

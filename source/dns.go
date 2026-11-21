@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -593,4 +594,75 @@ func apiDNSDelete(w http.ResponseWriter, r *http.Request, s *Session) (any, erro
 		return nil, err
 	}
 	return nil, dnsApply(s, in, true)
+}
+
+// dnsProp builds one dNSProperty value (MS-DNSP DNS_PROPERTY with a 4-byte payload).
+func dnsProp(id, val uint32) []byte {
+	b := make([]byte, 0, 26)
+	for _, v := range []uint32{4, 1, 0, 1, id, val} {
+		b = binary.LittleEndian.AppendUint32(b, v)
+	}
+	return append(b, 0, 0)
+}
+
+var zoneLabelRe = regexp.MustCompile(`^[A-Za-z0-9_]([A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?$`)
+
+// apiDNSZoneCreate adds a primary zone named <name>.<parent> in the same DNS partition as the parent zone, with an SOA
+// and NS record at its apex. It writes the zone straight into the directory, as the signed-in user, rather than going
+// through the DNS RPC interface that samba-tool dns zonecreate uses.
+func apiDNSZoneCreate(w http.ResponseWriter, r *http.Request, s *Session) (any, error) {
+	var in struct{ Parent, Name string }
+	if err := decode(r, &in); err != nil {
+		return nil, err
+	}
+	if !dnsZoneOK(s, in.Parent) {
+		return nil, errors.New("not a DNS zone")
+	}
+	name := strings.TrimSuffix(strings.TrimSpace(in.Name), ".")
+	if name == "" || len(name) > 150 {
+		return nil, errors.New("enter a name for the new zone")
+	}
+	for _, l := range strings.Split(name, ".") {
+		if !zoneLabelRe.MatchString(l) {
+			return nil, fmt.Errorf("“%s” is not a valid zone name (letters, digits, - and _, dot-separated)", name)
+		}
+	}
+	full := name + "." + dnLabel(in.Parent, 0)
+	dn := "DC=" + escapeRDN(full) + "," + parentDN(in.Parent)
+	err := s.With(func(c *Conn) error {
+		root, err := c.Read("", []string{"dnsHostName"})
+		if err != nil {
+			return err
+		}
+		host := root.Get("dnsHostName")
+		if host == "" {
+			return errors.New("could not tell which server hosts the zone")
+		}
+		soa, err := encodeDNSRecord("SOA", map[string]any{"primary": host, "admin": "hostmaster." + full, "serial": 1.0, "refresh": 900.0, "retry": 600.0, "expire": 86400.0, "minimum": 3600.0}, 3600, 1)
+		if err != nil {
+			return err
+		}
+		ns, err := encodeDNSRecord("NS", map[string]any{"target": host}, 3600, 1)
+		if err != nil {
+			return err
+		}
+		if err := c.Add(dn, []Mod{{Attr: "objectClass", Vals: svs([]string{"top", "dnsZone"})}, {Attr: "dc", Vals: sv(full)},
+			{Attr: "dNSProperty", Vals: [][]byte{dnsProp(1, 1), dnsProp(2, 2)}}}); err != nil { // primary zone, secure dynamic updates
+			var le *LDAPError
+			if errors.As(err, &le) && le.Code == 68 {
+				return fmt.Errorf("the zone %s already exists", full)
+			}
+			return err
+		}
+		if err := c.Add("DC=@,"+dn, []Mod{{Attr: "objectClass", Vals: svs([]string{"top", "dnsNode"})}, {Attr: "dc", Vals: sv("@")},
+			{Attr: "dnsRecord", Vals: [][]byte{soa, ns}}}); err != nil {
+			c.Delete(dn, false) // don't leave a zone without an apex
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"name": full, "dn": dn}, nil
 }

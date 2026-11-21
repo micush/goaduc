@@ -6,6 +6,8 @@ let info = null;            // {user, base, realm}
 let cur = null;             // currently selected container DN
 let items = [];             // items in list
 let selected = new Set();   // selected DNs in list
+let anchor = null;          // DN where a shift-click range starts
+let dragDns = [];           // DNs being dragged from the list
 let sortKey = 'name', sortDir = 1;
 let mode = 'browse';        // browse | search
 let tree = null;
@@ -259,7 +261,7 @@ function showMain() {
   const onSelect = dn => { mode = 'browse'; cur = dn; load(); };
   const onMenu = (e, n) => section === 'sites' ? sitesMenu(e.clientX, e.clientY, [n]) : inOtherNC(n.dn) ? browserMenu(e.clientX, e.clientY, [n]) : containerMenu(e.clientX, e.clientY, n);
   tree = section === 'sites' ? makeTree(treeEl, { rootDn: sitesRoot(), rootName: 'Sites', rootType: 'container', onSelect, onMenu })
-    : makeTree(treeEl, { onSelect, onMenu });
+    : makeTree(treeEl, { onSelect, onMenu, onDrop: moveDropped });
   tree.init();
 }
 
@@ -395,6 +397,7 @@ function makeTree(root, opts) {
     label.addEventListener('click', () => api_.select(n.dn));
     label.addEventListener('dblclick', toggle);
     label.addEventListener('contextmenu', e => { e.preventDefault(); api_.select(n.dn, true); opts.onMenu && opts.onMenu(e, n); });
+    if (opts.onDrop) dropTarget(label, () => n.dn, opts.onDrop);
     ul.append(n.li);
     return n;
   }
@@ -494,11 +497,30 @@ function renderList(note) {
       h('td', { title: it.description }, it.description),
       mode === 'search' ? h('td', { title: it.dn }, parentOf(it.dn)) : null);
     tr.addEventListener('click', e => {
-      if (e.ctrlKey || e.metaKey) selected.has(it.dn) ? selected.delete(it.dn) : selected.add(it.dn);
-      else { selected.clear(); selected.add(it.dn); }
+      const ai = anchor ? sorted.findIndex(x => x.dn === anchor) : -1;
+      if (e.shiftKey && ai >= 0) {   // range from the last plain/ctrl click; ctrl+shift adds to what is selected
+        const a = Math.min(ai, sorted.indexOf(it)), b = Math.max(ai, sorted.indexOf(it));
+        if (!(e.ctrlKey || e.metaKey)) selected.clear();
+        for (let k = a; k <= b; k++) selected.add(sorted[k].dn);
+        getSelection().removeAllRanges();
+      } else {
+        if (e.ctrlKey || e.metaKey) selected.has(it.dn) ? selected.delete(it.dn) : selected.add(it.dn);
+        else { selected.clear(); selected.add(it.dn); }
+        anchor = it.dn;
+      }
       paint();   // update in place: rebuilding the rows here made the second click of a double-click miss
     });
     byRow.set(tr, it);
+    if (canDrag(it)) {
+      tr.draggable = true;
+      tr.addEventListener('dragstart', e => {
+        if (!selected.has(it.dn)) { selected.clear(); selected.add(it.dn); paint(); }
+        dragDns = selItems().filter(canDrag).map(i => i.dn);
+        e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragDns.join('\n'));
+      });
+      tr.addEventListener('dragend', () => { dragDns = []; });
+    }
+    if (isCont(it) && !inOtherNC(it.dn)) dropTarget(tr, () => it.dn, moveDropped);
     tr.addEventListener('contextmenu', e => {
       e.preventDefault();
       if (!selected.has(it.dn)) { selected.clear(); selected.add(it.dn); paint(); }
@@ -524,6 +546,22 @@ async function openItem(it) {
 }
 
 const selItems = () => items.filter(i => selected.has(i.dn));
+
+// ---------- drag and drop ----------
+const MOVABLE = ['user', 'group', 'computer', 'ou', 'contact', 'container'];
+const canDrag = it => section === 'users' && !inOtherNC(it.dn) && MOVABLE.includes(it.type) && lc(it.dn) !== lc(info.base);
+// A drop is useful only on a container that is not one of the dragged objects (or inside one) and is not where they already are.
+const dropOk = target => dragDns.length && !inOtherNC(target) && !dragDns.every(d => lc(parentOf(d)) === lc(target)) && !dragDns.some(d => within(target, d));
+function dropTarget(el, getDn, onDrop) {
+  el.addEventListener('dragover', e => { if (dropOk(getDn())) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; el.classList.add('drop'); } });
+  el.addEventListener('dragleave', () => el.classList.remove('drop'));
+  el.addEventListener('drop', e => { el.classList.remove('drop'); if (!dropOk(getDn())) return; e.preventDefault(); onDrop(getDn(), dragDns.slice()); });
+}
+async function moveDropped(target, dns) {
+  const what = dns.length > 1 ? dns.length + ' objects' : '“' + rdnName(dns[0]) + '”';
+  if (!(await confirmBox('Move', `Move ${what} to “${rdnName(target)}”?`, 'Move'))) return;
+  await doMove(dns, target);
+}
 
 // ---------- menus ----------
 function newMenuEntries(parent) {
@@ -626,11 +664,13 @@ async function pickContainer(title) {
 
 async function moveObjs(dns) {
   const target = await pickContainer('Move to');
-  if (!target) return;
-  try {
-    for (const dn of dns) await POST('/api/move', { dn, newParent: target });
-  } catch (e) { return fail(e); }
-  selected.clear(); await fixCurrent(dns); await tree.refresh(target); await tree.refresh(parentOf(dns[0])); if (mode === 'browse') load();
+  if (target) await doMove(dns, target);
+}
+async function doMove(dns, target) {
+  let err = null;
+  for (const dn of dns) { try { await POST('/api/move', { dn, newParent: target }); } catch (e) { err = e; break; } }
+  selected.clear(); await fixCurrent(dns); await tree.refresh(target); await tree.refresh(parentOf(dns[0])); if (mode === 'browse') load(); else if (mode === 'search') rerunSearch();
+  if (err) fail(err);   // objects before the failing one have already moved
 }
 
 async function pickObjects(title, type, multi = true, base) {

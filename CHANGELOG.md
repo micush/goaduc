@@ -1,5 +1,44 @@
 # Changelog
 
+## [v29] - 2026-11-21 — Shift-click ranges and drag-and-drop moves
+
+### Added
+- **Shift-click selects a range** in the list (from the last plain or ctrl click); ctrl+shift-click adds the range to the
+  current selection. Ctrl/Cmd-click toggling, Move… and Delete… on a multi-selection already worked and are unchanged.
+- **Drag and drop to move.** Drag users, groups, computers, contacts, OUs or containers (one, or the whole selection) onto an
+  OU or container in the tree or in the list. The target is outlined while you hover, and a Move confirmation appears before
+  anything changes. Dropping where the objects already are, onto one of them, or into another naming context is ignored.
+
+### Changed
+- Move now shares one routine (`doMove`) between the Move… dialog and drag-and-drop. If one object in a batch is refused,
+  the ones before it have already moved; the list and tree are refreshed and the error is shown.
+
+### Verified
+- From `source/`: gofmt, `go vet`, `go test -race ./...`, `CGO_ENABLED=0 go test ./...`, linux/amd64, arm64, arm, 386,
+  riscv64 cross-compiles, `node --check static/*.js`. In Chromium against the mock server: shift range, ctrl toggle,
+  ctrl+shift, dragging a group onto an OU, confirmation, and the object appearing in the new OU.
+
+### Not verified
+- Dragging several objects at once, and touch screens (HTML5 drag events don't fire on most touch browsers; use Move…).
+
+## [v28] - 2026-11-21 — Create DNS subzones from the zone right-click menu
+
+### Added
+- **Right-click a zone > New subzone…** asks for a name and creates `<name>.<zone>` as a primary zone in the same DNS
+  partition as the parent (SOA and NS at the apex, secure dynamic updates), then selects it. Reverse zones work the same way.
+  The zone is written to the directory as the signed-in user (`POST /api/dns/zonecreate`), not through the DNS RPC
+  interface that `samba-tool dns zonecreate` uses. Names are checked, and an existing zone is refused.
+
+### Verified
+- From `source/`: gofmt, `go vet`, `go test -race ./...`, `CGO_ENABLED=0 go test ./...`, linux/amd64, arm64, arm, 386,
+  riscv64 cross-compiles, `node --check static/*.js`. New `TestDNSZoneCreate`; menu, dialog and nested result checked in
+  Chromium against the mock server.
+
+### Not verified
+- Against a real Samba DC: whether the DNS server serves a zone added this way without a restart, and the dNSProperty
+  values (primary, secure updates) are written from the MS-DNSP layout, not compared with one made by samba-tool.
+- There is still no zone delete in the UI (`samba-tool dns zonedelete`).
+
 ## [v27] - 2026-11-21 — DNS zone list: nested subzones, no pills, no hint text
 
 ### Changed
