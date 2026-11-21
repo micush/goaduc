@@ -81,9 +81,12 @@ main() {
   # the project may sit at the top of the repository or in a goaduc/ folder
   local root=$tmp/tree
   [ -f "$root/install.sh" ] || { [ -f "$tmp/tree/goaduc/install.sh" ] && root=$tmp/tree/goaduc; }
-  [ -f "$root/install.sh" ] && [ -f "$root/VERSION" ] ||
+  # VERSION sits in source/ (v21 and later) or, in older releases, next to install.sh
+  local vf=$root/source/VERSION
+  [ -f "$vf" ] || vf=$root/VERSION
+  [ -f "$root/install.sh" ] && [ -f "$vf" ] ||
     die "$tag does not look like a goaduc release (install.sh or VERSION missing)"
-  local ver; ver=$(tr -d '[:space:]' <"$root/VERSION")
+  local ver; ver=$(tr -d '[:space:]' <"$vf")
   [[ $ver =~ ^[0-9]+$ ]] || die "$tag has a bad VERSION: '$ver'"
   step "Installing goaduc v$ver"
 

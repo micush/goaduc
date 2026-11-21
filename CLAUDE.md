@@ -3,7 +3,7 @@
 goaduc is a Go web application that administers a Samba 4 Active Directory domain over LDAP/LDAPS: a browser
 clone of Users and Computers (ADUC), Sites and Services, DNS Manager, password policy and fine-grained PSOs, reports and
 CSV import, the AD Recycle Bin, domain/FSMO information, an LDAP/schema browser and an audit log. It is stdlib-only
-Go with a hand-written LDAPv3 client (`ldapc.go`), a vanilla-JS front end embedded with `go:embed` (`static/`), and a
+Go with a hand-written LDAPv3 client (`ldapc.go`), a vanilla-JS front end embedded with `go:embed` (`source/static/`), and a
 systemd installer (`install.sh`, `uninstall.sh`). This file is a standing instruction from the project owner so it
 doesn't need repeating each conversation. If you (Claude) are asked to change this project, follow the process below
 without being told to.
@@ -12,18 +12,24 @@ without being told to.
 
 1. **Do the requested work** (code, docs, config, whatever was asked).
 
-**Layout.** The tarball has one top-level directory, `goaduc/`, and the Go module is flat inside it: `go.mod`, every
-`*.go`, `static/` (the web UI: `app.js`, `tools.js`, `gpo.js`, `theme.js`, `style.css`), `VERSION` (must sit next to the Go files because `main.go` embeds it), `README.md`, `snaps/` (PNG screenshots the README embeds; retake them from the mock UI when a page's look changes),
-`CHANGELOG.md`, `LICENSE` (GPLv3), `install.sh`, `uninstall.sh`, `get.sh` (the `curl | bash` web installer: fetches the newest tag from GitHub and runs its `install.sh`; keep it working with the layout and `VERSION` rules here) and this file. All Go commands below run in the
-top of the tree. The installer expects `go.mod`, `main.go` and `VERSION` next to `install.sh`.
+**Layout.** The tarball has one top-level directory, `goaduc/`. The Go module lives in `goaduc/source/`: `go.mod`, every
+`*.go`, `static/` (the web UI: `app.js`, `tools.js`, `gpo.js`, `theme.js`, `style.css`; it has to be inside the module
+because `go:embed` cannot reach outside it) and `VERSION` (also embedded by `main.go`, so it sits next to the Go files).
+Next to `source/`, at the top: `README.md`, `snaps/` (PNG screenshots the README embeds; retake them from the mock UI when
+a page's look changes), `CHANGELOG.md`, `LICENSE` (GPLv3), `install.sh`, `uninstall.sh`, `get.sh` (the `curl | bash` web
+installer: fetches the newest tag from GitHub and runs its `install.sh`; keep it working with the layout and `VERSION`
+rules here) and this file. **All Go, `gofmt` and `node` commands below run in `source/`**, not the top. The installer
+expects `source/go.mod`, `source/main.go` and `source/VERSION` next to `install.sh`; the in-app updater and `get.sh`
+accept this layout and, for old releases, the flat one (everything at the top). Releases before v21 cannot update to a
+`source/` release from the web UI (their updater wants `go.mod` at the top): run `install.sh` / `get.sh` once.
 Files: `ldapc.go` (BER, filters, LDAP client), `main.go` (sessions, auth middleware, ADUC handlers, routes, `main()`),
 `sites.go` (Sites and Services create), `dns.go` (MS-DNSP record encode/decode, zone/record API), `tools.go` (domain
 info, policy/PSO, reports, recycle bin, audit), `gpo.go` (Group Policy objects, links, version/extension bookkeeping, `gpoCommit`), `gpofiles.go` (SYSVOL: GPT.INI,
 Registry.pol, GptTmpl.inf, plain files), `update.go` (the Update page: archive unpack, build, swap, boot guard), `tlscert.go` (self-signed web certificate), `webcert.go` (Settings → Certificate: upload, live swap, reset), `webcert_test.go`, `gpo_test.go`, `update_test.go`, `mock_test.go` (in-memory
 mock domain controller + integration tests), `ldapc_test.go`, `tools_test.go`.
 
-2. **Build and test before packaging, not after.** From the top of the tree run `gofmt -l .` (must print nothing),
-   `go build -o /dev/null .` (a bare `go build` drops a `goaduc` binary in the tree — delete it if it appears),
+2. **Build and test before packaging, not after.** From `source/` run `gofmt -l .` (must print nothing),
+   `go build -o /dev/null .` (a bare `go build` drops a `goaduc` binary in `source/` — delete it if it appears),
    `go vet ./...` and `go test -race -count=1 ./...`; also `CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...`
    (the shipped binary is static, so that is the configuration that matters). Don't skip straight to packaging on a
    change that could plausibly have broken something. Beyond the unit tests:
@@ -71,7 +77,7 @@ mock domain controller + integration tests), `ldapc_test.go`, `tools_test.go`.
      auth/CSRF test to make it pass. Run the real binary once: start it as an unprivileged user with a scratch
      `-data-dir`, `curl -sk https://127.0.0.1:<port>/`, check the key is mode 0600 and the certificate verifies with
      `--cacert` against `localhost`.
-   - **Touched the UI (`static/`)?** `node --check static/app.js static/tools.js static/theme.js` at minimum. For real
+   - **Touched the UI (`static/`)?** `node --check source/static/app.js source/static/tools.js source/static/theme.js` (or from `source/`: `static/...`) at minimum. For real
      behaviour serve the mock (`ADUC_MOCK_SERVE=1 go test -run TestMockServe -timeout 0` serves a mock LDAP on
      127.0.0.1:3389 and the UI on 127.0.0.1:8099, any user/password) and drive it with headless Chromium (Playwright is
      installed in the sandbox; use `colorScheme: "light"` and `"dark"`): log in, click through the pages you touched,
@@ -102,7 +108,7 @@ mock domain controller + integration tests), `ldapc_test.go`, `tools_test.go`.
    For each of `linux/amd64`, `linux/arm64`, `linux/arm`, `linux/386`, `linux/riscv64` run
    `GOOS=<os> GOARCH=<arch> go build -o /dev/null .`. The installer is Linux-only; don't promise other OSes. If a new
    target is added, add it to this list in the same change.
-4. **Bump `VERSION`.** It's a single plain integer (no `v` prefix, no semver) at `VERSION`, embedded into the binary
+4. **Bump `VERSION`.** It's a single plain integer (no `v` prefix, no semver) at `source/VERSION`, embedded into the binary
    (`goaduc --version` prints `goaduc vN`, which the installer parses). Increment it by exactly 1. `TestVersionIsPlainInteger`
    fails if the file is malformed — fix the file, don't weaken the test.
 5. **Append a new entry to the top of `CHANGELOG.md`**, immediately below the `# Changelog` header (and any

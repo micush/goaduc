@@ -1,5 +1,31 @@
 # Changelog
 
+## [v21] - 2026-11-21 — Go sources moved into `source/`
+
+### Changed
+- **Layout:** `go.mod`, every `*.go`, `VERSION` and `static/` moved into `source/`. (`static/` had to come along: `go:embed`
+  cannot read files outside the module directory.) The top of the tree now holds `source/`, `snaps/`, `README.md`,
+  `CHANGELOG.md`, `LICENSE`, `install.sh`, `uninstall.sh`, `get.sh` and `CLAUDE.md`. Go commands run from `source/`
+  (`cd source && go build -o goaduc .`).
+- `install.sh` builds from and checks `source/` (`go.mod`, `main.go`, `VERSION`) and installs `source/VERSION`.
+- `get.sh` reads `VERSION` from `source/` and still accepts the old flat layout.
+- The in-app updater (`update.go`) finds the module in `source/` and still accepts the flat layout; `go build` runs there.
+  `update_test.go` covers both layouts.
+- `CLAUDE.md` layout, command locations and packaging notes; README build/test notes.
+
+### Verified
+- From `source/`: gofmt, `go vet`, `go test -race ./...`, `CGO_ENABLED=0 go test ./...`, linux/amd64, arm64, arm, 386,
+  riscv64 builds and `node --check` on the JS. Installer: `--dry-run`, then a real run in a scratch root with a stub
+  `systemctl`: fresh install (`goaduc v20`) and an upgrade from a copied tree with `source/VERSION` bumped (`goaduc v21`,
+  installed VERSION updated). `get.sh` against a local fake release (`--version v99`) installed `goaduc v99`.
+
+### Not verified
+- Forced-failure rollback, downgrade refusal, distro matrix and uninstall were not re-run: nothing in those paths changed.
+
+### Note for upgrading
+- A goaduc **older than v21 cannot update itself to this release from the web UI** (its updater wants `go.mod` at the top
+  of the archive). Update once with `install.sh` or the `get.sh` one-liner; from v21 on the Update page works as before.
+
 ## [v20] - 2026-11-21 — Settings page: Certificate and Update
 
 ### Added

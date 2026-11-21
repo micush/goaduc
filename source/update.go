@@ -335,7 +335,7 @@ func extractUpdate(archive, dst string) (string, error) {
 			return "", fmt.Errorf("archive: %q is a link or special file", h.Name)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(dst, "go.mod")); err == nil {
+	if hasModule(dst) {
 		return dst, nil
 	}
 	es, _ := os.ReadDir(dst)
@@ -346,15 +346,30 @@ func extractUpdate(archive, dst string) (string, error) {
 		}
 	}
 	if len(dirs) == 1 {
-		if _, err := os.Stat(filepath.Join(dst, dirs[0], "go.mod")); err == nil {
+		if hasModule(filepath.Join(dst, dirs[0])) {
 			return filepath.Join(dst, dirs[0]), nil
 		}
 	}
 	return "", errors.New("archive has no go.mod: this is not a goaduc release")
 }
 
+// srcDir is where the Go module sits in a release tree: its source/ folder (the current layout), or the top of the
+// tree (releases before v21 had everything flat).
+func srcDir(tree string) string {
+	if _, err := os.Stat(filepath.Join(tree, "source", "go.mod")); err == nil {
+		return filepath.Join(tree, "source")
+	}
+	return tree
+}
+
+func hasModule(dir string) bool {
+	_, err := os.Stat(filepath.Join(srcDir(dir), "go.mod"))
+	return err == nil
+}
+
 // checkTree makes sure the tree looks like goaduc and is newer than what runs now; it returns the new version.
 func checkTree(tree string) (int, error) {
+	tree = srcDir(tree)
 	for _, f := range []string{"go.mod", "main.go", "VERSION", "static/index.html"} {
 		if _, err := os.Stat(filepath.Join(tree, filepath.FromSlash(f))); err != nil {
 			return 0, fmt.Errorf("this does not look like a goaduc release (%s is missing)", f)
@@ -381,7 +396,7 @@ func goBuild(goBin, tree, work, out string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), updateBuildTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, goBin, "build", "-trimpath", "-o", out, ".")
-	cmd.Dir = tree
+	cmd.Dir = srcDir(tree)
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOTOOLCHAIN=local", "GOPROXY=off", "GOFLAGS=", "GOWORK=off",
 		"GOCACHE="+filepath.Join(work, "gocache"), "GOPATH="+filepath.Join(work, "gopath"))
 	if b, err := cmd.CombinedOutput(); err != nil {

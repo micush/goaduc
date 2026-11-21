@@ -53,10 +53,11 @@ func mkTgz(t *testing.T, ents []tent) []byte {
 func releaseTgz(t *testing.T, ver string) []byte {
 	return mkTgz(t, []tent{
 		{name: "goaduc/", typ: tar.TypeDir},
-		{name: "goaduc/go.mod", body: "module goaduc\n\ngo 1.21\n"},
-		{name: "goaduc/main.go", body: "package main\n\nimport (\n\t_ \"embed\"\n\t\"fmt\"\n\t\"os\"\n\t\"strings\"\n)\n\n//go:embed VERSION\nvar v string\n\nfunc main() {\n\tif len(os.Args) > 1 && os.Args[1] == \"--version\" {\n\t\tfmt.Println(\"goaduc v\" + strings.TrimSpace(v))\n\t}\n}\n"},
-		{name: "goaduc/VERSION", body: ver + "\n"},
-		{name: "goaduc/static/index.html", body: "<!doctype html>"},
+		{name: "goaduc/source/", typ: tar.TypeDir},
+		{name: "goaduc/source/go.mod", body: "module goaduc\n\ngo 1.21\n"},
+		{name: "goaduc/source/main.go", body: "package main\n\nimport (\n\t_ \"embed\"\n\t\"fmt\"\n\t\"os\"\n\t\"strings\"\n)\n\n//go:embed VERSION\nvar v string\n\nfunc main() {\n\tif len(os.Args) > 1 && os.Args[1] == \"--version\" {\n\t\tfmt.Println(\"goaduc v\" + strings.TrimSpace(v))\n\t}\n}\n"},
+		{name: "goaduc/source/VERSION", body: ver + "\n"},
+		{name: "goaduc/source/static/index.html", body: "<!doctype html>"},
 	})
 }
 
@@ -121,23 +122,26 @@ func TestExtractUpdateSafety(t *testing.T) {
 	if _, err := extractUpdate(src, filepath.Join(t.TempDir(), "t")); err == nil || !strings.Contains(err.Error(), "go.mod") {
 		t.Errorf("no go.mod: %v", err)
 	}
-	// good, in a top-level directory (our archive and GitHub's) and flat
+	// good, in a top-level directory (our archive and GitHub's) and flat; the module in source/ (v21 on) or at the top (older)
 	for _, top := range []string{"goaduc/", "goaduc-v99/", ""} {
-		src := writeTemp(t, t.TempDir(), "a.tgz", mkTgz(t, []tent{{name: top + "go.mod", body: "module x\n"}, {name: top + "VERSION", body: "99"}}))
-		dst := filepath.Join(t.TempDir(), "tree")
-		root, err := extractUpdate(src, dst)
-		if err != nil {
-			t.Fatalf("%q: %v", top, err)
-		}
-		if _, err := os.Stat(filepath.Join(root, "VERSION")); err != nil {
-			t.Errorf("%q: root %s has no VERSION", top, root)
+		for _, sub := range []string{"source/", ""} {
+			src := writeTemp(t, t.TempDir(), "a.tgz", mkTgz(t, []tent{{name: top + sub + "go.mod", body: "module x\n"}, {name: top + sub + "VERSION", body: "99"}}))
+			dst := filepath.Join(t.TempDir(), "tree")
+			root, err := extractUpdate(src, dst)
+			if err != nil {
+				t.Fatalf("%q %q: %v", top, sub, err)
+			}
+			if _, err := os.Stat(filepath.Join(srcDir(root), "VERSION")); err != nil {
+				t.Errorf("%q %q: root %s has no VERSION", top, sub, root)
+			}
 		}
 	}
 }
 
 func TestCheckTree(t *testing.T) {
-	mk := func(ver string, skip string) string {
-		d := t.TempDir()
+	mkAt := func(sub, ver string, skip string) string {
+		top := t.TempDir()
+		d := filepath.Join(top, sub)
 		for f, b := range map[string]string{"go.mod": "module x", "main.go": "package main", "VERSION": ver, "static/index.html": "x"} {
 			if f == skip {
 				continue
@@ -145,9 +149,13 @@ func TestCheckTree(t *testing.T) {
 			os.MkdirAll(filepath.Dir(filepath.Join(d, f)), 0o755)
 			os.WriteFile(filepath.Join(d, f), []byte(b), 0o644)
 		}
-		return d
+		return top
 	}
+	mk := func(ver, skip string) string { return mkAt("source", ver, skip) }
 	cur := curVersion()
+	if n, err := checkTree(mkAt("", strconv.Itoa(cur+1), "")); err != nil || n != cur+1 { // older flat layout
+		t.Fatalf("flat: %d %v", n, err)
+	}
 	if n, err := checkTree(mk(strconv.Itoa(cur+1)+"\n", "")); err != nil || n != cur+1 {
 		t.Fatalf("newer: %d %v", n, err)
 	}

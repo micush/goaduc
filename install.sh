@@ -50,6 +50,7 @@ OS_RELEASE=${GOADUC_OS_RELEASE:-/etc/os-release}
 SETTLE=${GOADUC_SETTLE:-3}
 
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+GOSRC=$SRC/source   # the Go module: go.mod, *.go, VERSION, static/
 
 # ── output ───────────────────────────────────────────────────────────────────
 if [ -t 1 ]; then B=$'\033[1m'; R=$'\033[31m'; Y=$'\033[33m'; G=$'\033[32m'; N=$'\033[0m'; else B=; R=; Y=; G=; N=; fi
@@ -183,9 +184,9 @@ if [ "$(id -u)" -ne 0 ] && [ "$DRY" = 0 ] && [ -z "$P" ]; then
   die "must be run as root (sudo ./install.sh)"
 fi
 
-[ -f "$SRC/go.mod" ] && [ -f "$SRC/VERSION" ] && [ -f "$SRC/main.go" ] ||
-  die "run this script from the top of the goaduc tree (go.mod, VERSION and main.go not found next to it)"
-NEW_VER=$(tr -d '[:space:]' <"$SRC/VERSION")
+[ -f "$GOSRC/go.mod" ] && [ -f "$GOSRC/VERSION" ] && [ -f "$GOSRC/main.go" ] ||
+  die "run this script from the top of the goaduc tree (source/go.mod, source/VERSION and source/main.go not found next to it)"
+NEW_VER=$(tr -d '[:space:]' <"$GOSRC/VERSION")
 [[ $NEW_VER =~ ^[0-9]+$ ]] || die "bad VERSION file: '$NEW_VER'"
 
 # ── distro ───────────────────────────────────────────────────────────────────
@@ -395,7 +396,7 @@ NEWBIN=$TMP/goaduc
 if [ "$DRY" = 1 ]; then
   info "[dry-run] CGO_ENABLED=0 $GO build -trimpath -o goaduc ."
 else
-  ( cd "$SRC" &&
+  ( cd "$GOSRC" &&
     GOTOOLCHAIN=local CGO_ENABLED=0 GOCACHE="$TMP/gocache" GOPATH="$TMP/gopath" GOFLAGS=-mod=mod \
     "$GO" build -trimpath -ldflags='-s -w' -o "$NEWBIN" . ) ||
     die "build failed — the installed version (if any) was not touched"
@@ -541,7 +542,7 @@ fi
 } | { res=$(write_file "$CONF" 0644); info "config $CONF: $res"; }
 
 # docs and the uninstaller (so removal works without the source tree)
-run install -m 0644 "$SRC/VERSION" "$SHARE/VERSION"
+run install -m 0644 "$GOSRC/VERSION" "$SHARE/VERSION"
 for f in README.md CHANGELOG.md LICENSE; do
   [ -f "$SRC/$f" ] && run install -m 0644 "$SRC/$f" "$SHARE/$f"
 done

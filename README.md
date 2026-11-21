@@ -229,6 +229,7 @@ To remove it, run `sudo goaduc-uninstall`. Add `--purge` to also delete the conf
 
 ## Build and run by hand
 
+    cd source
     go build -o goaduc .
     ./goaduc -server ldaps://dc1.example.com:636 -ca /var/lib/samba/private/tls/ca.pem
     # then open https://localhost:8443 and sign in as administrator@example.com
@@ -276,6 +277,8 @@ Auto, Light and Dark, and your choice is remembered in the browser.
   only, with a 30 minute idle timeout. If it isn't on localhost, put it behind HTTPS.
 * Samba's `ldap server require strong auth` default is fine with LDAPS and StartTLS simple binds.
 * Saved queries live in the browser's local storage, so they're per browser and not shared.
+* The Go code, `go.mod`, `VERSION` and the web UI files all live in `source/`, so run `go build`, `go test` and the mock
+  from there.
 * `go test` covers the BER, filter and client code against an in-process mock server. I exercised the full UI against a
   mock directory, **not a real Samba DC**, so please try it on a test domain first.
 * To click around without a DC, run `ADUC_MOCK_SERVE=1 go test -run TestMockServe -timeout 0`. It serves the mock
