@@ -1,5 +1,21 @@
 # Changelog
 
+## [v26] - 2026-11-21 — Tree rows stay aligned in a narrow pane
+
+### Fixed
+- **Tree rows misaligned when the pane was dragged narrow.** The expand arrow (`.twisty`) was a shrinkable flex item, so on rows
+  whose name was wider than the pane it was squeezed narrower than on short rows, shifting the icon and text left. The arrow
+  no longer shrinks and a row is at least as wide as its content (the pane scrolls sideways instead), so the selection
+  highlight also covers the whole name.
+
+### Verified
+- From `source/`: gofmt, `go vet`, `go test -race ./...`, `CGO_ENABLED=0 go test ./...`, linux/amd64, arm64, arm, 386,
+  riscv64 builds and `node --check` on the JS. Chromium against the mock with the pane dragged to its 120 px minimum: arrow
+  position and width and icon position identical on every row (before: they differed between short and long names).
+
+### Not verified
+- Other browsers (only Chromium was tried).
+
 ## [v25] - 2026-11-21 — Recycle Bin: purge on all DCs, with consent; "Deleted from" fix
 
 ### Added
