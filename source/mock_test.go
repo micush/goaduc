@@ -603,6 +603,20 @@ func TestMockServe(t *testing.T) { // ADUC_MOCK_SERVE=1 go test -run TestMockSer
 	d := newMockDC(t)
 	root := mockSysvol(t)
 	sysvolRoot = root
+	{ // Settings > Backup without a real Samba: a fake backup that writes small files
+		bdir := t.TempDir()
+		initBackup(filepath.Join(bdir, "state"))
+		backupSt.Cfg.Dir = filepath.Join(bdir, "backups")
+		backupCanRun = func() string { return "" }
+		bn := 0
+		backupExec = func(dir string) (string, error) {
+			os.MkdirAll(dir, 0o700)
+			time.Sleep(2 * time.Second)
+			bn++
+			name := fmt.Sprintf("samba-backup-samdom.example.com-%s-%d.tar.bz2", time.Now().Format("2006-01-02T15-04-05"), bn)
+			return name, os.WriteFile(filepath.Join(dir, name), make([]byte, 3<<20), 0o600)
+		}
+	}
 	t.Logf("mock SYSVOL in %s", root)
 	if os.Getenv("ADUC_MOCK_RB") == "off" { // start with the Recycle Bin disabled, like a fresh Samba domain
 		delete(d.dir[strings.ToLower("CN=Recycle Bin Feature,CN=Optional Features,CN=Directory Service,CN=Windows NT,CN=Services,"+tCfg)].attrs, "msDS-EnabledFeatureBL")

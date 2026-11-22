@@ -1,5 +1,33 @@
 # Changelog
 
+## [v31] - 2026-11-22 — Settings > Backup: scheduled offline domain backups with FIFO rotation
+
+### Added
+- **Settings > Backup** tab. *Back up now* runs `samba-tool domain backup offline --targetdir=<folder>`; *Run
+  automatically* does it daily or weekly at a chosen server time. After each successful backup the oldest `*.tar.bz2`
+  files in the folder are deleted until *Keep* (1-365) remain. A failed backup removes nothing. The page shows the last
+  result (when, file, who/what started it, what was rotated away), the next run, and the files in the folder.
+- **Gated like the other local operations:** only a verified Domain/Enterprise Admin (checked over their own LDAP
+  connection) can save the schedule or run a backup, and it needs goaduc to run as root with `samba-tool` on the host;
+  otherwise the page says why it can't run. Changes and runs are logged.
+- Schedule and last result are kept in `backup.json` in the data directory. A slot that passed while the schedule was
+  off, or while goaduc was down, doesn't fire retroactively more than once, and one slot never runs twice. The folder
+  is created 0700; backups are not offered for download (they contain secrets).
+- `snaps/17-settings-backup.png` and a Backup section in the README.
+
+### Verified
+- From `source/`: gofmt, `go vet`, `go test -race ./...`, `CGO_ENABLED=0 go test ./...`, linux/amd64, arm64, arm, 386,
+  riscv64 cross-compiles, `node --check static/*.js`. New tests: schedule slots (daily/weekly), rotation (keeps newest,
+  ignores other files and folders), API (refused for a non-admin, input validation, manual runs with rotation, failed
+  run keeps files, host that can't run, scheduled run, no double run). The tab was driven in Chromium against the mock
+  server with a fake backup command: save, run, rotation to 3 files.
+
+### Not verified
+- A real `samba-tool domain backup offline` on a real DC: that it runs from goaduc's service account, how long it takes,
+  and that the new file is found by diffing the folder before and after (I assumed it writes a `.tar.bz2` into
+  `--targetdir`). Run *Back up now* once and check the folder before relying on the schedule.
+- A restore from a backup made this way.
+
 ## [v30] - 2026-11-21 — Ctrl/shift-click and multi-delete in DNS records
 
 ### Added

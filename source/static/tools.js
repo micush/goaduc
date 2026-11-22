@@ -513,7 +513,7 @@ let settingsTab = 'Certificate';
 function renderSettings(page) {
   const body = h('div', { class: 'setbody' });
   const tabs = h('div', { class: 'tabs' });
-  const subs = { Certificate: renderCertificate, Update: renderUpdate };
+  const subs = { Certificate: renderCertificate, Backup: renderBackup, Update: renderUpdate };
   const show = k => {
     settingsTab = k;
     [...tabs.children].forEach(t => t.classList.toggle('on', t.textContent === k));
@@ -563,6 +563,63 @@ async function renderCertificate(page) {
     if (!(await confirmBox('Use self-signed', 'Replace the uploaded certificate with a self-signed one? Browsers will warn again.', 'Replace'))) return;
     err.textContent = '';
     try { st = await POST('/api/settings/cert/reset', {}); draw(); } catch (e) { err.textContent = fmtErr(e); }
+  }
+  await refresh();
+}
+
+async function renderBackup(page) {
+  const err = h('span', { class: 'terr' });
+  const body = h('div', { class: 'tablewrap' });
+  let st = null, timer = null;
+  const when = v => new Date(v).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+  const saveBtn = h('button', { class: 'primary', onclick: save }, 'Save');
+  const runBtn = h('button', { onclick: run }, 'Back up now');
+  page.append(h('div', { class: 'toolbar' }, saveBtn, runBtn, err), body);
+  const on = h('input', { type: 'checkbox' }), dir = h('input', { type: 'text', style: 'max-width:480px' }), keep = h('input', { type: 'number', min: 1, max: 365, style: 'width:80px' });
+  const freq = h('select', { style: 'width:auto' }, h('option', { value: 'daily' }, 'Every day'), h('option', { value: 'weekly' }, 'Every week'));
+  const wd = h('select', { style: 'width:auto' }, ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d, i) => h('option', { value: i }, d)));
+  const tm = h('input', { type: 'time', style: 'width:auto' });
+  freq.onchange = () => { wd.hidden = freq.value !== 'weekly'; };
+  const form = h('table', { class: 'simple kv bk' }, h('tbody', {},
+    h('tr', {}, h('th', {}, 'Schedule'), h('td', {}, h('label', {}, on, ' Run automatically'))),
+    h('tr', {}, h('th', {}, 'When'), h('td', {}, freq, ' ', wd, ' at ', tm, h('span', { class: 'muted' }, ' (server time)'))),
+    h('tr', {}, h('th', {}, 'Folder'), h('td', {}, dir, h('div', { class: 'muted' }, 'Use a folder just for backups: the oldest *.tar.bz2 files in it are deleted.'))),
+    h('tr', {}, h('th', {}, 'Keep'), h('td', {}, keep, h('span', { class: 'muted' }, ' newest backups')))));
+  const info = h('div', {}), files = h('div', {});
+  body.append(form, info, files);
+  let filled = false;
+  function fill() {
+    const c = st.cfg;
+    on.checked = c.enabled; dir.value = c.dir; keep.value = c.keep; freq.value = c.freq; wd.value = c.weekday; tm.value = c.time; wd.hidden = c.freq !== 'weekly';
+    filled = true;
+  }
+  function draw() {
+    if (!filled) fill();
+    const off = !st.canRun, busy = st.running;
+    for (const x of [on, dir, keep, freq, wd, tm]) x.disabled = !st.admin;
+    saveBtn.disabled = !st.admin;
+    runBtn.disabled = off || busy; runBtn.title = off ? st.why : ''; runBtn.textContent = busy ? 'Backing up…' : 'Back up now';
+    const l = st.last, rows = [];
+    if (st.why) rows.push(['Status', h('span', { class: 'muted' }, st.why)]);
+    if (l) rows.push(['Last backup', h('span', { class: l.ok && !l.error ? '' : 'terr' }, when(l.time) + (l.ok ? ' — ' + l.file : ' — failed: ' + l.error) + (l.ok && l.error ? ' (' + l.error + ')' : '') + ' (' + l.trigger + (l.by ? ', ' + l.by : '') + ')')]);
+    if (l && l.removed && l.removed.length) rows.push(['Removed', l.removed.join(', ')]);
+    if (st.next) rows.push(['Next run', when(st.next)]);
+    info.replaceChildren(rows.length ? h('table', { class: 'simple kv bk' }, h('tbody', {}, rows.map(([k, v]) => h('tr', {}, h('th', {}, k), h('td', {}, v))))) : '');
+    files.replaceChildren(h('h4', {}, 'Backups in ' + st.cfg.dir),
+      st.files.length ? h('table', { class: 'simple' }, h('thead', {}, h('tr', {}, h('th', {}, 'File'), h('th', {}, 'Size'), h('th', {}, 'Created'))),
+        h('tbody', {}, st.files.map(f => h('tr', {}, h('td', {}, f.name), h('td', {}, fmtSize(f.size)), h('td', {}, when(f.time)))))) : h('div', { class: 'muted' }, 'None yet.'));
+    if (busy && !timer) timer = setInterval(() => { if (!page.isConnected) { clearInterval(timer); timer = null; } else refresh(); }, 1500);
+    if (!busy && timer) { clearInterval(timer); timer = null; }
+  }
+  async function refresh() { try { st = await GET('/api/settings/backup'); draw(); } catch (e) { err.textContent = fmtErr(e); } }
+  async function save() {
+    err.textContent = '';
+    try { st = await POST('/api/settings/backup/save', { enabled: on.checked, dir: dir.value, keep: +keep.value, freq: freq.value, time: tm.value, weekday: +wd.value }); filled = false; draw(); } catch (e) { err.textContent = fmtErr(e); }
+  }
+  async function run() {
+    err.textContent = '';
+    if (!(await confirmBox('Back up now', 'Run the offline domain backup now? It can take a while on a large domain.', 'Back up'))) return;
+    try { await POST('/api/settings/backup/run', {}); await refresh(); } catch (e) { err.textContent = fmtErr(e); }
   }
   await refresh();
 }

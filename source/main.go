@@ -1161,6 +1161,8 @@ func main() {
 	initUpdate(*dataDir)
 	initDNSBin(*dataDir)
 	initPeers(*dataDir)
+	initBackup(*dataDir)
+	startBackupScheduler()
 	if sysvolRoot == "" {
 		if st, err := os.Stat("/var/lib/samba/sysvol"); err == nil && st.IsDir() {
 			sysvolRoot = "/var/lib/samba/sysvol"
@@ -1222,6 +1224,7 @@ func buildMux() *http.ServeMux {
 	mux.Handle("/", http.FileServer(http.FS(sub)))
 	registerUpdate(mux)
 	registerWebCert(mux)
+	registerBackup(mux)
 	mux.HandleFunc("/api/login", handleLogin)
 	mux.HandleFunc("/api/logout", handleLogout)
 	mux.HandleFunc("/api/info", auth(apiInfo))

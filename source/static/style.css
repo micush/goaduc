@@ -102,3 +102,4 @@ table.kv th{width:40%;border:0;font-weight:400}table.kv td{border:0}
 .splitter:hover,.splitter.drag{background:linear-gradient(var(--accent),var(--accent)) center/3px 100% no-repeat}
 
 .tnode.drop,tr.row.drop{outline:2px solid var(--accent,#1a73e8);outline-offset:-2px;background:var(--sel)}
+table.kv.bk th{width:130px}

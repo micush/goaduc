@@ -170,7 +170,7 @@ purge fallback above are the only places goaduc acts with more than the signed-i
 
 ### Settings
 
-The last tab. It holds two things: the web certificate and the updater.
+The last tab. It holds three things: the web certificate, backups and the updater.
 
 #### Certificate
 
@@ -192,6 +192,23 @@ back to the self-signed pair instead of refusing to start. Only **Domain Admins 
 certificate, and the audit log records who did it (never the key). If you start goaduc with `-tls-cert` and
 `-tls-key` (or `ADUC_TLS_CERT` / `ADUC_TLS_KEY`), those files are yours: the page just shows them and you replace the
 files and restart. With `-http` there is no certificate at all.
+
+#### Backup
+
+Runs Samba's own offline domain backup (`samba-tool domain backup offline`) and keeps the newest few. *Back up now*
+runs one straight away. Tick *Run automatically* and pick a time (every day, or one weekday a week; it's the server's
+clock) and goaduc runs it by itself, and a run it missed while it was stopped happens once when it's back, not many
+times. *Keep* is how many backups to hold: after each good backup the oldest `*.tar.bz2` files in the folder are
+deleted until that many are left, so give it a folder that is only for backups. A failed backup deletes nothing.
+The last result, the next run and the files in the folder are listed on the page.
+
+![Backup](snaps/17-settings-backup.png)
+
+It needs goaduc running as root on a DC with `samba-tool`, and only **Domain Admins and Enterprise Admins** can change
+the schedule or run it (the page tells you when it can't run and why). The schedule lives in `backup.json` in the data
+directory. A backup holds password hashes and other secrets, so the folder is created readable by root only and goaduc
+never offers the files for download: copy them off the DC with your own tools. It backs up the domain, not shares,
+`smb.conf` or goaduc's own data folder. Restoring is done with `samba-tool domain backup restore` on a new DC.
 
 #### Update
 
