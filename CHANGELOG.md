@@ -1,5 +1,19 @@
 # Changelog
 
+## [v34] - 2026-11-22 — Backup folder check CodeQL understands
+
+### Changed
+- The backup create, list, rotate and run steps now work out the folder as a path *below* `-backup-root`
+  (`filepath.Rel` + `filepath.IsLocal`) and rebuild it from the root, instead of comparing prefixes. Same behaviour
+  (a folder outside the root is refused); this is the form CodeQL recognises as safe for the 3 remaining path alerts.
+
+### Verified
+- From `source/`: gofmt, `go vet`, `go test -race ./...`, `CGO_ENABLED=0 go test ./...`, linux/amd64, arm64, arm, 386,
+  riscv64 cross-compiles, `node --check static/*.js`. `TestBackupDirConfined` and `TestBackupAPI` cover outside paths.
+
+### Not verified
+- That CodeQL closes the last 3 alerts (it can't be run here).
+
 ## [v33] - 2026-11-22 — Update tab says why it is off; more scan fixes
 
 ### Changed

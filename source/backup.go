@@ -186,10 +186,11 @@ var backupCanRun = func() string {
 
 // backupExec runs the backup into dir and returns the file it made. A variable so tests can replace it.
 var backupExec = func(dir string) (string, error) {
-	dir = filepath.Clean(dir)
-	if r := filepath.Clean(backupRoot); !filepath.IsAbs(dir) || (dir != r && !strings.HasPrefix(dir, r+string(filepath.Separator))) {
+	rel, rerr := filepath.Rel(filepath.Clean(backupRoot), filepath.Clean(dir)) // the folder as a path below the backup root
+	if rerr != nil || !filepath.IsLocal(rel) {
 		return "", errors.New("the backup folder is outside " + backupRoot)
 	}
+	dir = filepath.Join(backupRoot, rel)
 	bin, err := exec.LookPath("samba-tool")
 	if err != nil {
 		return "", errors.New("samba-tool not found")
@@ -227,10 +228,11 @@ type backupItem struct {
 // backupFiles lists the *.tar.bz2 files in dir, newest first.
 func backupFiles(dir string) []backupItem {
 	out := []backupItem{}
-	dir = filepath.Clean(dir)
-	if r := filepath.Clean(backupRoot); !filepath.IsAbs(dir) || (dir != r && !strings.HasPrefix(dir, r+string(filepath.Separator))) {
+	rel, rerr := filepath.Rel(filepath.Clean(backupRoot), filepath.Clean(dir)) // the folder as a path below the backup root
+	if rerr != nil || !filepath.IsLocal(rel) {
 		return out
 	}
+	dir = filepath.Join(backupRoot, rel)
 	es, err := os.ReadDir(dir)
 	if err != nil {
 		return out
@@ -254,10 +256,11 @@ func backupFiles(dir string) []backupItem {
 
 // backupRotate removes the oldest *.tar.bz2 files in dir until keep remain, and returns their names.
 func backupRotate(dir string, keep int) ([]string, error) {
-	dir = filepath.Clean(dir)
-	if r := filepath.Clean(backupRoot); !filepath.IsAbs(dir) || (dir != r && !strings.HasPrefix(dir, r+string(filepath.Separator))) {
+	rel, rerr := filepath.Rel(filepath.Clean(backupRoot), filepath.Clean(dir)) // the folder as a path below the backup root
+	if rerr != nil || !filepath.IsLocal(rel) {
 		return nil, errors.New("the backup folder is outside " + backupRoot)
 	}
+	dir = filepath.Join(backupRoot, rel)
 	fs := backupFiles(dir)
 	var gone []string
 	for i := len(fs) - 1; i >= keep; i-- { // oldest last
