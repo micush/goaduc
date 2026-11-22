@@ -52,6 +52,23 @@ type backupState struct {
 	LastSlot time.Time   `json:"lastSlot"`
 }
 
+// backupRoot is the folder backups must live under (-backup-root); the folder chosen in Settings can't point outside it.
+var backupRoot = "/var/backups"
+
+// backupDir returns dir cleaned, and whether it is backupRoot itself or inside it. Every function that touches the
+// folder goes through this, so a stored or submitted path can never reach elsewhere on the disk.
+func backupDir(dir string) (string, bool) {
+	root := filepath.Clean(backupRoot)
+	d := filepath.Clean(dir)
+	if !filepath.IsAbs(d) || strings.ContainsRune(d, 0) || d == "/" {
+		return "", false
+	}
+	if d != root && !strings.HasPrefix(d, root+string(filepath.Separator)) {
+		return "", false
+	}
+	return d, true
+}
+
 var (
 	backupMu      sync.Mutex // guards backupSt, backupPath, backupRunning
 	backupSt      backupState
@@ -61,7 +78,7 @@ var (
 )
 
 func defaultBackupCfg() backupCfg {
-	return backupCfg{Dir: "/var/backups/samba-ad", Keep: 7, Freq: "daily", Time: "02:00"}
+	return backupCfg{Dir: filepath.Join(backupRoot, "samba-ad"), Keep: 7, Freq: "daily", Time: "02:00"}
 }
 
 func initBackup(dataDir string) {
@@ -136,10 +153,11 @@ func validBackupCfg(c *backupCfg) error {
 	if c.Dir == "" || !filepath.IsAbs(c.Dir) || strings.ContainsRune(c.Dir, 0) {
 		return errors.New("the backup folder must be an absolute path")
 	}
-	c.Dir = filepath.Clean(c.Dir)
-	if c.Dir == "/" {
-		return errors.New("choose a folder just for backups, not /")
+	d, ok := backupDir(c.Dir)
+	if !ok {
+		return errors.New("the backup folder must be inside " + filepath.Clean(backupRoot) + " (change it with -backup-root)")
 	}
+	c.Dir = d
 	if c.Keep < 1 || c.Keep > 365 {
 		return errors.New("keep between 1 and 365 backups")
 	}
@@ -168,6 +186,10 @@ var backupCanRun = func() string {
 
 // backupExec runs the backup into dir and returns the file it made. A variable so tests can replace it.
 var backupExec = func(dir string) (string, error) {
+	dir, ok := backupDir(dir)
+	if !ok {
+		return "", errors.New("the backup folder is outside " + backupRoot)
+	}
 	bin, err := exec.LookPath("samba-tool")
 	if err != nil {
 		return "", errors.New("samba-tool not found")
@@ -204,8 +226,12 @@ type backupItem struct {
 
 // backupFiles lists the *.tar.bz2 files in dir, newest first.
 func backupFiles(dir string) []backupItem {
-	es, err := os.ReadDir(dir)
 	out := []backupItem{}
+	dir, ok := backupDir(dir)
+	if !ok {
+		return out
+	}
+	es, err := os.ReadDir(dir)
 	if err != nil {
 		return out
 	}
@@ -228,6 +254,10 @@ func backupFiles(dir string) []backupItem {
 
 // backupRotate removes the oldest *.tar.bz2 files in dir until keep remain, and returns their names.
 func backupRotate(dir string, keep int) ([]string, error) {
+	dir, ok := backupDir(dir)
+	if !ok {
+		return nil, errors.New("the backup folder is outside " + backupRoot)
+	}
 	fs := backupFiles(dir)
 	var gone []string
 	for i := len(fs) - 1; i >= keep; i-- { // oldest last

@@ -1,5 +1,37 @@
 # Changelog
 
+## [v32] - 2026-11-22 — Security scan (CodeQL) fixes
+
+Went through all 40 open CodeQL alerts one by one.
+
+### Fixed
+- **Integer conversions** (`go/incorrect-integer-conversion`, 12 alerts): values read from the directory (password
+  policy, fine-grained policies, GPO flags) are narrowed with a clamped `i32`, and DNS `be16`/`be32` clamp instead of
+  wrapping. Same results for real values; out-of-range values no longer wrap around.
+- **Logout cookie** now has `Secure` (when served over TLS), `HttpOnly` and `SameSite=Strict`, like the login cookie.
+- **Backup folder is confined.** It must be inside `-backup-root` (default `/var/backups`, `ADUC_BACKUP_ROOT`), and the
+  create, list, rotate and run steps each re-check that, so a stored or submitted path can't reach elsewhere on disk.
+  **Behaviour change from v31:** a folder outside `/var/backups` is refused; the default is now
+  `/var/backups/samba-ad` (unchanged). If you saved another folder, move it under the root or set `-backup-root`.
+- **Peer purge host** now comes from the directory's own DC list (the matching entry), not from the browser's text.
+- **Zip Slip** (updater): the extraction target is also checked to be inside the unpack folder after `badEntry`.
+- **GPO file paths** (`gpofiles.go`, ~20 alerts): path components are required to be local (no `..`, separators or NUL)
+  where they are resolved, and the final path is checked to be inside the GPO folder. The existing checks (`safeRel`,
+  symlink refusal) already prevented escaping; these make the guarantee explicit.
+
+### Not changed (needs dismissing in GitHub as false positives)
+- **Disabled TLS certificate check** in `peers.go` (2 alerts). That is deliberate: the probe only reads a peer's
+  certificate so you can see its fingerprint and decide to trust it (nothing is sent), and the purge connection checks
+  the certificate by hand against the name or the exact fingerprint you approved. Comments in the code say so.
+
+### Verified
+- From `source/`: gofmt, `go vet`, `go test -race ./...`, `CGO_ENABLED=0 go test ./...`, linux/amd64, arm64, arm, 386,
+  riscv64 cross-compiles, `node --check static/*.js`. New `TestBackupDirConfined`; backup tests updated for the root.
+
+### Not verified
+- That CodeQL now closes the alerts: it can't be run here. Push and re-scan; any that remain are named by line in the
+  new scan.
+
 ## [v31] - 2026-11-22 — Settings > Backup: scheduled offline domain backups with FIFO rotation
 
 ### Added

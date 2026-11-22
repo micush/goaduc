@@ -180,7 +180,7 @@ func apiGPOList(w http.ResponseWriter, r *http.Request, s *Session) (any, error)
 				continue
 			}
 			v := atoi64(e.Get("versionNumber"))
-			d := gpoDTO{GUID: g, DN: e.DN, Name: e.Get("displayName"), Flags: int(atoi64(e.Get("flags"))), Version: v, UserVer: v >> 16 & 0xffff, MachVer: v & 0xffff,
+			d := gpoDTO{GUID: g, DN: e.DN, Name: e.Get("displayName"), Flags: i32(atoi64(e.Get("flags"))), Version: v, UserVer: v >> 16 & 0xffff, MachVer: v & 0xffff,
 				Created: fmtLDAPTime(e.Get("whenCreated")), Changed: fmtLDAPTime(e.Get("whenChanged")), Path: e.Get("gPCFileSysPath"),
 				MachExt: e.Get("gPCMachineExtensionNames"), UserExt: e.Get("gPCUserExtensionNames"), Links: []gpoLinkDTO{}}
 			if d.Name == "" {

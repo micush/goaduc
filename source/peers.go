@@ -112,6 +112,9 @@ func probePeer(host string) peerInfo {
 		return pi
 	}
 	raw.SetDeadline(time.Now().Add(peerTimes.probe))
+	// Deliberately unverified here: this handshake only reads the peer's certificate so the person can be shown its fingerprint
+	// and choose to trust it. Nothing is sent to the peer on this connection, and purgeOnPeer verifies the certificate
+	// (by name, or against the exact fingerprint they approved) before any request goes out.
 	tc := tls.Client(raw, &tls.Config{ServerName: host, InsecureSkipVerify: true, MinVersion: tls.VersionTLS12})
 	defer tc.Close()
 	if err := tc.Handshake(); err != nil {
@@ -151,7 +154,7 @@ func peerClient(host, approvedFP string) *http.Client {
 			return (&net.Dialer{Timeout: peerTimes.probe}).DialContext(ctx, network, peerAddr(host))
 		},
 		TLSClientConfig: &tls.Config{
-			ServerName: host, MinVersion: tls.VersionTLS12, InsecureSkipVerify: true, // verified by hand below
+			ServerName: host, MinVersion: tls.VersionTLS12, InsecureSkipVerify: true, // verified by hand in VerifyPeerCertificate below: name, or the approved SHA-256 pin.
 			VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
 				if len(raw) == 0 {
 					return errors.New("no certificate presented")

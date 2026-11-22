@@ -300,6 +300,9 @@ func extractUpdate(archive, dst string) (string, error) {
 			return "", fmt.Errorf("archive: unsafe path %q", h.Name)
 		}
 		target := filepath.Join(dst, filepath.FromSlash(name))
+		if !strings.HasPrefix(target, filepath.Clean(dst)+string(filepath.Separator)) { // belt and braces after badEntry
+			return "", fmt.Errorf("archive: unsafe path %q", h.Name)
+		}
 		switch h.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(target, 0o755); err != nil {

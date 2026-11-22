@@ -51,6 +51,9 @@ func resolveCI(base, rel string) (full string, exists bool) {
 		if comp == "" {
 			continue
 		}
+		if !filepath.IsLocal(comp) || strings.ContainsAny(comp, "\\\x00") { // never ".." or a separator: callers pass safeRel output, this keeps it true
+			return "", false
+		}
 		next := filepath.Join(cur, comp)
 		if !exists {
 			cur = next
@@ -273,6 +276,9 @@ func gpoPath(dir, rel string) (full string, exists bool, err error) {
 		return
 	}
 	full, exists = resolveCI(dir, rel)
+	if full == "" {
+		return "", false, errors.New("invalid path")
+	}
 	realDir, e := filepath.EvalSymlinks(dir)
 	if e != nil {
 		return "", false, e
@@ -287,6 +293,9 @@ func gpoPath(dir, rel string) (full string, exists bool, err error) {
 		if rc != realDir && !strings.HasPrefix(rc, realDir+string(filepath.Separator)) {
 			return "", false, errors.New("path escapes the GPO folder")
 		}
+	}
+	if full = filepath.Clean(full); full != filepath.Clean(dir) && !strings.HasPrefix(full, filepath.Clean(dir)+string(filepath.Separator)) {
+		return "", false, errors.New("path escapes the GPO folder")
 	}
 	return full, exists, nil
 }

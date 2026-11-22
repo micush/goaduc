@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/http"
 	"regexp"
@@ -120,8 +121,23 @@ func fUint(f map[string]any, k string, max uint64) (uint64, error) {
 	return n, nil
 }
 
-func be16(v uint64) []byte { b := make([]byte, 2); binary.BigEndian.PutUint16(b, uint16(v)); return b }
-func be32(v uint64) []byte { b := make([]byte, 4); binary.BigEndian.PutUint32(b, uint32(v)); return b }
+// be16 and be32 encode a number the caller has already range-checked; anything larger is clamped, never wrapped.
+func be16(v uint64) []byte {
+	if v > math.MaxUint16 {
+		v = math.MaxUint16
+	}
+	b := make([]byte, 2)
+	binary.BigEndian.PutUint16(b, uint16(v))
+	return b
+}
+func be32(v uint64) []byte {
+	if v > math.MaxUint32 {
+		v = math.MaxUint32
+	}
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, uint32(v))
+	return b
+}
 
 // encodeDNSRecord builds a static (non-aging) record value.
 func encodeDNSRecord(typ string, fields map[string]any, ttl uint32, serial uint32) ([]byte, error) {

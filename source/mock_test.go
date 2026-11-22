@@ -606,6 +606,7 @@ func TestMockServe(t *testing.T) { // ADUC_MOCK_SERVE=1 go test -run TestMockSer
 	{ // Settings > Backup without a real Samba: a fake backup that writes small files
 		bdir := t.TempDir()
 		initBackup(filepath.Join(bdir, "state"))
+		backupRoot = bdir
 		backupSt.Cfg.Dir = filepath.Join(bdir, "backups")
 		backupCanRun = func() string { return "" }
 		bn := 0

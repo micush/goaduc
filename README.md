@@ -199,7 +199,8 @@ Runs Samba's own offline domain backup (`samba-tool domain backup offline`) and 
 runs one straight away. Tick *Run automatically* and pick a time (every day, or one weekday a week; it's the server's
 clock) and goaduc runs it by itself, and a run it missed while it was stopped happens once when it's back, not many
 times. *Keep* is how many backups to hold: after each good backup the oldest `*.tar.bz2` files in the folder are
-deleted until that many are left, so give it a folder that is only for backups. A failed backup deletes nothing.
+deleted until that many are left, so give it a folder that is only for backups. The folder has to be inside
+`/var/backups` (change that with `-backup-root` or `ADUC_BACKUP_ROOT`); the default is `/var/backups/samba-ad`. A failed backup deletes nothing.
 The last result, the next run and the files in the folder are listed on the page.
 
 ![Backup](snaps/17-settings-backup.png)

@@ -610,7 +610,7 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 		delete(sessions, ck.Value)
 		sessMu.Unlock()
 	}
-	http.SetCookie(w, &http.Cookie{Name: "aduc", Value: "", Path: "/", MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: "aduc", Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil})
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
@@ -1148,6 +1148,7 @@ func main() {
 	flag.StringVar(&updateRepo, "update-repo", envOr("ADUC_UPDATE_REPO", defaultUpdateRepo), "GitHub owner/repo the Update page fetches releases from")
 	flag.BoolVar(&updateDisabled, "no-update", os.Getenv("ADUC_NO_UPDATE") == "1", "turn off the Update page (software updates from the web UI)")
 	auditPath := flag.String("audit-log", os.Getenv("ADUC_AUDIT_LOG"), "append JSON-lines audit log of changes to this file")
+	flag.StringVar(&backupRoot, "backup-root", envOr("ADUC_BACKUP_ROOT", backupRoot), "backups can only be written under this folder (Settings > Backup)")
 	showVer := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 	if *showVer {

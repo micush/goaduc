@@ -136,6 +136,17 @@ func timeToFT(t time.Time) int64 { return (t.Unix() + 11644473600) * 10000000 }
 
 func atoi64(s string) int64 { n, _ := strconv.ParseInt(s, 10, 64); return n }
 
+// i32 narrows a directory value to int, clamped to the 32-bit range so it is the same on every architecture.
+func i32(v int64) int {
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if v < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int(v)
+}
+
 const day100ns = 864000000000
 const min100ns = 600000000
 
@@ -282,10 +293,10 @@ func apiPolicy(w http.ResponseWriter, r *http.Request, s *Session) (any, error) 
 		}
 		props := atoi64(e.Get("pwdProperties"))
 		return policyDTO{
-			MinLength: int(atoi64(e.Get("minPwdLength"))), History: int(atoi64(e.Get("pwdHistoryLength"))),
-			MaxAgeDays: int(intervalToUnits(e.Get("maxPwdAge"), day100ns)), MinAgeDays: int(intervalToUnits(e.Get("minPwdAge"), day100ns)),
-			Threshold: int(atoi64(e.Get("lockoutThreshold"))), DurationMin: int(intervalToUnits(e.Get("lockoutDuration"), min100ns)),
-			WindowMin:  int(intervalToUnits(e.Get("lockOutObservationWindow"), min100ns)),
+			MinLength: i32(atoi64(e.Get("minPwdLength"))), History: i32(atoi64(e.Get("pwdHistoryLength"))),
+			MaxAgeDays: i32(intervalToUnits(e.Get("maxPwdAge"), day100ns)), MinAgeDays: i32(intervalToUnits(e.Get("minPwdAge"), day100ns)),
+			Threshold: i32(atoi64(e.Get("lockoutThreshold"))), DurationMin: i32(intervalToUnits(e.Get("lockoutDuration"), min100ns)),
+			WindowMin:  i32(intervalToUnits(e.Get("lockOutObservationWindow"), min100ns)),
 			Complexity: props&1 != 0, Reversible: props&16 != 0}, nil
 	}
 	var p policyDTO
@@ -389,12 +400,12 @@ func apiPSOList(w http.ResponseWriter, r *http.Request, s *Session) (any, error)
 			return err
 		}
 		for _, e := range es {
-			out = append(out, psoDTO{DN: e.DN, Name: dnLabel(e.DN, 0), Precedence: int(atoi64(e.Get("msDS-PasswordSettingsPrecedence"))),
+			out = append(out, psoDTO{DN: e.DN, Name: dnLabel(e.DN, 0), Precedence: i32(atoi64(e.Get("msDS-PasswordSettingsPrecedence"))),
 				policyDTO: policyDTO{
-					MinLength: int(atoi64(e.Get("msDS-MinimumPasswordLength"))), History: int(atoi64(e.Get("msDS-PasswordHistoryLength"))),
-					MaxAgeDays: int(intervalToUnits(e.Get("msDS-MaximumPasswordAge"), day100ns)), MinAgeDays: int(intervalToUnits(e.Get("msDS-MinimumPasswordAge"), day100ns)),
-					Threshold: int(atoi64(e.Get("msDS-LockoutThreshold"))), DurationMin: int(intervalToUnits(e.Get("msDS-LockoutDuration"), min100ns)),
-					WindowMin:  int(intervalToUnits(e.Get("msDS-LockoutObservationWindow"), min100ns)),
+					MinLength: i32(atoi64(e.Get("msDS-MinimumPasswordLength"))), History: i32(atoi64(e.Get("msDS-PasswordHistoryLength"))),
+					MaxAgeDays: i32(intervalToUnits(e.Get("msDS-MaximumPasswordAge"), day100ns)), MinAgeDays: i32(intervalToUnits(e.Get("msDS-MinimumPasswordAge"), day100ns)),
+					Threshold: i32(atoi64(e.Get("msDS-LockoutThreshold"))), DurationMin: i32(intervalToUnits(e.Get("msDS-LockoutDuration"), min100ns)),
+					WindowMin:  i32(intervalToUnits(e.Get("msDS-LockoutObservationWindow"), min100ns)),
 					Complexity: strings.EqualFold(e.Get("msDS-PasswordComplexityEnabled"), "TRUE"), Reversible: strings.EqualFold(e.Get("msDS-PasswordReversibleEncryptionEnabled"), "TRUE")},
 				AppliesTo: e.Strs("msDS-PSOAppliesTo")})
 		}
@@ -971,15 +982,15 @@ func apiPurge(w http.ResponseWriter, r *http.Request, s *Session) (any, error) {
 	if first == nil && in.Local && len(in.Peers) > 0 {
 		var hosts []string
 		_ = s.With(func(c *Conn) error { hosts, _ = peerHosts(c, s); return nil })
-		known := map[string]bool{}
+		known := map[string]string{} // lower-cased name -> the name as the directory lists it
 		for _, h := range hosts {
-			known[h] = true
+			known[strings.ToLower(h)] = h
 		}
 		var mu sync.Mutex
 		var wg sync.WaitGroup
 		for _, p := range in.Peers {
-			host := strings.ToLower(strings.TrimSpace(p.Host))
-			if !known[host] { // only domain controllers the directory lists, never an address from the browser
+			host, ok := known[strings.ToLower(strings.TrimSpace(p.Host))]
+			if !ok { // only domain controllers the directory lists, never an address from the browser
 				peerRes = append(peerRes, peerResult{Host: p.Host, Error: "not a domain controller of this domain"})
 				continue
 			}

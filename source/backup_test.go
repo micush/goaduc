@@ -35,6 +35,9 @@ func TestBackupSlots(t *testing.T) {
 
 func TestBackupRotate(t *testing.T) {
 	dir := t.TempDir()
+	oroot := backupRoot
+	t.Cleanup(func() { backupRoot = oroot })
+	backupRoot = dir
 	base := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < 6; i++ {
 		p := filepath.Join(dir, fmt.Sprintf("samba-backup-x-%d.tar.bz2", i))
@@ -67,10 +70,14 @@ func TestBackupAPI(t *testing.T) {
 	ocan, oexec, onow := backupCanRun, backupExec, backupNow
 	t.Cleanup(func() { backupCanRun, backupExec, backupNow = ocan, oexec, onow; initBackup(t.TempDir()) })
 	backupCanRun = func() string { return "" }
-	out := t.TempDir()
+	oroot := backupRoot
+	t.Cleanup(func() { backupRoot = oroot })
+	backupRoot = t.TempDir()
+	out := filepath.Join(backupRoot, "ad")
 	n := 0
 	backupExec = func(dir string) (string, error) {
 		n++
+		os.MkdirAll(dir, 0o700)
 		name := fmt.Sprintf("samba-backup-samdom-%03d.tar.bz2", n)
 		p := filepath.Join(dir, name)
 		if err := os.WriteFile(p, []byte("data"), 0o600); err != nil {
@@ -97,6 +104,8 @@ func TestBackupAPI(t *testing.T) {
 
 	for _, bad := range []map[string]any{
 		{"dir": "relative", "keep": 3, "freq": "daily", "time": "02:00"}, {"dir": "/", "keep": 3, "freq": "daily", "time": "02:00"},
+		{"dir": "/etc", "keep": 3, "freq": "daily", "time": "02:00"}, {"dir": out + "/../../etc", "keep": 3, "freq": "daily", "time": "02:00"},
+		{"dir": backupRoot + "x/ad", "keep": 3, "freq": "daily", "time": "02:00"},
 		{"dir": out, "keep": 0, "freq": "daily", "time": "02:00"}, {"dir": out, "keep": 3, "freq": "hourly", "time": "02:00"},
 		{"dir": out, "keep": 3, "freq": "daily", "time": "25:00"}, {"dir": out, "keep": 3, "freq": "daily", "time": "2:00"}} {
 		c.fail("POST", "/api/settings/backup/save", bad, "")
@@ -175,5 +184,26 @@ func TestBackupAPI(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if n != before+1 {
 		t.Fatal("ran twice for one slot")
+	}
+}
+
+func TestBackupDirConfined(t *testing.T) {
+	oroot := backupRoot
+	t.Cleanup(func() { backupRoot = oroot })
+	backupRoot = "/var/backups"
+	for in, want := range map[string]bool{"/var/backups": true, "/var/backups/samba-ad": true, "/var/backups/a/../b": true,
+		"/var/backups/../etc": false, "/var/backupsx": false, "/etc": false, "/": false, "var/backups": false, "": false} {
+		if _, ok := backupDir(in); ok != want {
+			t.Errorf("backupDir(%q) = %v, want %v", in, ok, want)
+		}
+	}
+	if fs := backupFiles("/etc"); len(fs) != 0 {
+		t.Fatal("listed outside the backup root")
+	}
+	if _, err := backupRotate("/etc", 1); err == nil {
+		t.Fatal("rotated outside the backup root")
+	}
+	if _, err := backupExec("/etc"); err == nil {
+		t.Fatal("ran outside the backup root")
 	}
 }
