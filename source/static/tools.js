@@ -632,12 +632,14 @@ async function renderUpdate(page) {
   const goBtn = h('button', { class: 'primary', hidden: true, onclick: () => online(latest) }, '');
   const up = h('input', { type: 'file', hidden: true, accept: '.tgz,.tar.gz,application/gzip' });
   const upBtn = h('button', { onclick: () => up.click() }, 'Upload release…');
-  page.append(h('div', { class: 'toolbar' }, checkBtn, goBtn, upBtn, up, err), body);
+  const note = h('span', { class: 'muted' });
+  page.append(h('div', { class: 'toolbar' }, checkBtn, goBtn, upBtn, up, err, note), body);
   const WORD = { downloading: 'Downloading…', building: 'Building…', applying: 'Restarting…' };
 
   function draw() {
     const job = st.job || {}, busy = !!WORD[job.state], last = st.last;
     const off = busy || !st.canApply;
+    note.textContent = st.canApply ? '' : st.why || 'Updates are not available.';   // say why the buttons are off, don't leave it to a tooltip
     for (const b of [checkBtn, upBtn]) { b.disabled = off; b.title = st.canApply ? '' : st.why; }
     goBtn.hidden = !busy && !(latest && latest.newer);
     goBtn.disabled = off; goBtn.title = st.canApply ? '' : st.why;

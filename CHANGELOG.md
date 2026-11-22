@@ -1,5 +1,24 @@
 # Changelog
 
+## [v33] - 2026-11-22 — Update tab says why it is off; more scan fixes
+
+### Changed
+- **Settings > Update shows the reason in plain text** when its buttons are disabled (not a Domain/Enterprise Admin,
+  no Go toolchain found, program folder not writable, `-no-update`). Before, it was only in a hover tooltip, so the page
+  just looked broken. Reproduced nothing wrong in the mock server (buttons enabled for an admin, reason shown for a
+  non-admin), so the cause on a real host is still unknown until that line is read.
+- Backup: the confinement check to `-backup-root` is now written inline in each function that touches the folder
+  (create, list, rotate, run), and the file size comes from the confined listing.
+- DNS `be16`/`be32` build their bytes by shifting and masking.
+
+### Verified
+- From `source/`: gofmt, `go vet`, `go test -race ./...`, `CGO_ENABLED=0 go test ./...`, linux/amd64, arm64, arm, 386,
+  riscv64 cross-compiles, `node --check static/*.js`. Update tab driven in Chromium as an admin and a non-admin.
+
+### Not verified
+- Why Update is unavailable on the reporting host (see above), and that CodeQL closes the remaining 6 alerts. The 2
+  "Disabled TLS certificate check" alerts in `peers.go` are intentional (see v32) and need dismissing in GitHub.
+
 ## [v32] - 2026-11-22 — Security scan (CodeQL) fixes
 
 Went through all 40 open CodeQL alerts one by one.

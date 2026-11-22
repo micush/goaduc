@@ -186,8 +186,8 @@ var backupCanRun = func() string {
 
 // backupExec runs the backup into dir and returns the file it made. A variable so tests can replace it.
 var backupExec = func(dir string) (string, error) {
-	dir, ok := backupDir(dir)
-	if !ok {
+	dir = filepath.Clean(dir)
+	if r := filepath.Clean(backupRoot); !filepath.IsAbs(dir) || (dir != r && !strings.HasPrefix(dir, r+string(filepath.Separator))) {
 		return "", errors.New("the backup folder is outside " + backupRoot)
 	}
 	bin, err := exec.LookPath("samba-tool")
@@ -227,8 +227,8 @@ type backupItem struct {
 // backupFiles lists the *.tar.bz2 files in dir, newest first.
 func backupFiles(dir string) []backupItem {
 	out := []backupItem{}
-	dir, ok := backupDir(dir)
-	if !ok {
+	dir = filepath.Clean(dir)
+	if r := filepath.Clean(backupRoot); !filepath.IsAbs(dir) || (dir != r && !strings.HasPrefix(dir, r+string(filepath.Separator))) {
 		return out
 	}
 	es, err := os.ReadDir(dir)
@@ -254,8 +254,8 @@ func backupFiles(dir string) []backupItem {
 
 // backupRotate removes the oldest *.tar.bz2 files in dir until keep remain, and returns their names.
 func backupRotate(dir string, keep int) ([]string, error) {
-	dir, ok := backupDir(dir)
-	if !ok {
+	dir = filepath.Clean(dir)
+	if r := filepath.Clean(backupRoot); !filepath.IsAbs(dir) || (dir != r && !strings.HasPrefix(dir, r+string(filepath.Separator))) {
 		return nil, errors.New("the backup folder is outside " + backupRoot)
 	}
 	fs := backupFiles(dir)
@@ -287,9 +287,7 @@ func backupDo(trigger, by string) (*backupLast, error) {
 		res.Error = err.Error()
 	} else {
 		res.OK, res.File = true, name
-		if fi, err := os.Stat(filepath.Join(cfg.Dir, name)); err == nil {
-			res.Size = fi.Size()
-		}
+		res.Size = backupSize(cfg.Dir, name)
 		var rerr error
 		if res.Removed, rerr = backupRotate(cfg.Dir, cfg.Keep); rerr != nil {
 			res.Error = "backup made, but removing old ones failed: " + rerr.Error()
@@ -415,4 +413,14 @@ func registerBackup(mux *http.ServeMux) {
 	mux.HandleFunc("/api/settings/backup", auth(apiBackup))
 	mux.HandleFunc("/api/settings/backup/save", auth(apiBackupSave))
 	mux.HandleFunc("/api/settings/backup/run", auth(apiBackupRun))
+}
+
+// backupSize is the size of a backup file, 0 if it can't be read or is outside the backup folder.
+func backupSize(dir, name string) int64 {
+	for _, f := range backupFiles(dir) { // only files the confined listing returns
+		if f.Name == name {
+			return f.Size
+		}
+	}
+	return 0
 }

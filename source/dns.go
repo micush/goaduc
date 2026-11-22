@@ -126,17 +126,13 @@ func be16(v uint64) []byte {
 	if v > math.MaxUint16 {
 		v = math.MaxUint16
 	}
-	b := make([]byte, 2)
-	binary.BigEndian.PutUint16(b, uint16(v))
-	return b
+	return []byte{byte(v >> 8 & 0xff), byte(v & 0xff)}
 }
 func be32(v uint64) []byte {
 	if v > math.MaxUint32 {
 		v = math.MaxUint32
 	}
-	b := make([]byte, 4)
-	binary.BigEndian.PutUint32(b, uint32(v))
-	return b
+	return []byte{byte(v >> 24 & 0xff), byte(v >> 16 & 0xff), byte(v >> 8 & 0xff), byte(v & 0xff)}
 }
 
 // encodeDNSRecord builds a static (non-aging) record value.
